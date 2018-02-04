@@ -1,0 +1,30 @@
+{
+    "manifest_version" : 2,
+    "name" : "__MSG_ext_title__",
+    "short_name" : "__MSG_ext_short_name__",
+    "version" : "0.1.0.101",
+    "description" : "__MSG_ext_description__",
+    "author" : "furyu",
+    "default_locale" : "ja",
+    
+    "icons" : {
+        "48" : "img/icon_48.png",
+        "64" : "img/icon_64.png",
+        "96" : "img/icon_96.png",
+        "128" : "img/icon_128.png"
+    },
+    
+    "content_scripts" : [
+        {
+            "matches" : [
+                "https://www.amazon.co.jp/gp/your-account/order-history*",
+                "https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*",
+                "https://www.amazon.co.jp/gp/css/summary/print.html*",
+                "https://www.amazon.co.jp/ap/signin*"
+             ],
+            "js" : [ "js/jquery.min.js", "js/amzOrderHistoryFilter.user.js" ],
+            "run_at" : "document_end",
+            "all_frames" : true
+        }
+    ]
+}

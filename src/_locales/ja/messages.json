@@ -1,0 +1,14 @@
+{
+    "ext_title" : {
+        "message" : "アマゾン注文履歴フィルタ"
+    ,   "description" : "The title of the extension."
+    }
+,   "ext_short_name" : {
+        "message" : "AOHF"
+    ,   "description" : "The short version of the extension's name."
+    }
+,   "ext_description" : {
+        "message" : "アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。"
+    ,   "description" : "The description of the extension."
+    }
+}
