@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.1
+// @version         0.1.0.2
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
@@ -67,7 +67,7 @@ var OPTIONS = {
 
 // ■ 共通変数 {
 var SCRIPT_NAME = 'amzOrderHistoryFilter',
-    DEBUG = true;
+    DEBUG = false;
 
 if ( window[ SCRIPT_NAME + '_touched' ] ) {
     return;

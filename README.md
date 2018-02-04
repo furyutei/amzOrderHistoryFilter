@@ -36,6 +36,11 @@ Firefox＋[Tampermonkey](https://addons.mozilla.org/ja/firefox/addon/tampermonke
 
 ■ 使い方
 ---
+インストール後、注文履歴を表示して対象となる年を選択すると、対象月を選択するためのプルダウンメニューおよび絞り込み用チェックボックスが表示される。  
+対象月と絞り込み条件を選択すると、該当する注文一覧が表示される。  
+また、[領収書印刷用画面]ボタンを押すことで別タブが開き、対象となる注文の領収書がまとめて読み込まれる。  
+
+※詳細は[ブログの記事](http://furyu.hatenablog.com/entry/amzOrderHistoryFilter#%E4%BD%BF%E3%81%84%E6%96%B9) を参照のこと。  
 
 
 ■ 外部ライブラリなど
@@ -45,3 +50,4 @@ Firefox＋[Tampermonkey](https://addons.mozilla.org/ja/firefox/addon/tampermonke
 
 ■ 関連記事
 ---
+- [【アマゾン注文履歴フィルタ】確定申告にも便利かも？！ Kindle 等のデジタルコンテンツの領収書をまとめて表示する拡張機能／アドオン／ユーザースクリプト - 風柳メモ](http://furyu.hatenablog.com/entry/amzOrderHistoryFilter)  
