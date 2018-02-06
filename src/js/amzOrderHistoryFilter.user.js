@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.2
+// @version         0.1.0.3
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
@@ -54,6 +54,7 @@ THE SOFTWARE.
 // ■ パラメータ {
 var OPTIONS = {
     OPEN_PRINT_DIALOG_AUTO : false, // true: 印刷ダイアログを自動で起動
+    REMOVE_REISSUE_STRINGS : false, // true: 「再発行」を取り除く
     
     DEFAULT_FILTER_INCLUDE_DIGITAL : true, // フィルタ対象(デジタルコンテンツ)のデフォルト値(true: 有効)
     DEFAULT_FILTER_INCLUDE_NONDIGITAL : false, // フィルタ対象(デジタルコンテンツ以外)のデフォルト値(true: 有効)
@@ -82,18 +83,23 @@ if ( typeof jQuery != 'function' ) {
 
 var $ = jQuery,
     IS_WEB_EXTENSION = !! ( window.is_web_extension ),
+    IS_FIREFOX = ( 0 <= navigator.userAgent.toLowerCase().indexOf( 'firefox' ) ),
+    IS_EDGE = ( 0 <= navigator.userAgent.toLowerCase().indexOf( 'edge' ) ),
     WEB_EXTENSION_INIT = window[ SCRIPT_NAME + '_web_extension_init' ];
 
 
-OPTIONS.SELECT_MONTH_LABEL_TEXT = "対象月選択";
-OPTIONS.SELECT_MONTH_NO_SELECT_TEXT = "未選択";
-OPTIONS.SELECT_MONTH_ALL_TEXT = "通年";
+OPTIONS.SELECT_MONTH_LABEL_TEXT = '対象月選択';
+OPTIONS.SELECT_MONTH_NO_SELECT_TEXT = '未選択';
+OPTIONS.SELECT_MONTH_ALL_TEXT = '通年';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_DIGITAL_TEXT = 'デジタル';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT = 'デジタル以外';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT = '予約分を含む';
 OPTIONS.COUNTER_LABEL_DIGITAL_TEXT = 'デジタル';
 OPTIONS.COUNTER_LABEL_NONDIGITAL_TEXT = 'デジタル以外';
-OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = "領収書印刷用画面";
+OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = '領収書印刷用画面';
+OPTIONS.LOGIN_REQUIRED_MESSAGE = 'サーバー側よりログインが要求されましたので、取得を中止します。';
+OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE = '応答がないままタイムアウトしました。領収書の取得を最初からやり直します。';
+
 
 // }
 
@@ -102,6 +108,19 @@ OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = "領収書印刷用画面";
 function to_array( array_like_object ) {
     return Array.prototype.slice.call( array_like_object );
 } // end of to_array()
+
+
+if ( typeof console.log.apply == 'undefined' ) {
+    // MS-Edge 拡張機能では console.log.apply 等が undefined
+    // → apply できるようにパッチをあてる
+    // ※参考：[javascript - console.log.apply not working in IE9 - Stack Overflow](https://stackoverflow.com/questions/5538972/console-log-apply-not-working-in-ie9)
+    
+    [ 'log','info','warn','error','assert','dir','clear','profile','profileEnd' ].forEach( function ( method ) {
+        console[ method ] = this.bind( console[ method ], console );
+    }, Function.prototype.call );
+    
+    console.log( 'note: console.log.apply is undefined => patched' );
+}
 
 
 function log_debug() {
@@ -215,6 +234,14 @@ var open_child_window = ( function () {
             'pointerEvents' : 'none'
         } );
     
+    if ( DEBUG ) {
+        jq_iframe_template.css( {
+            'width' : '500px',
+            'height' : '500px',
+            'visibility' : 'visible'
+        } );
+    }
+    
     return function ( url, options ) {
         if ( ! options ) {
             options = {};
@@ -245,13 +272,23 @@ var open_child_window = ( function () {
             if ( options.is_iframe ) {
                 var jq_iframe = jq_iframe_template.clone();
                 
-                //jq_iframe.attr( 'src', url );
-                
                 $( document.documentElement ).append( jq_iframe );
                 
                 child_window = jq_iframe[ 0 ].contentWindow;
-                child_window.name = name;
-                child_window.location.href = url;
+                
+                try {
+                    child_window.name = name;
+                    child_window.location.href = url;
+                }
+                catch ( error ) {
+                    log_error( 'set failure', error );
+                    
+                    // TODO: MS-Edge 拡張機能だと、name が設定できないことがある
+                    jq_iframe.attr( {
+                        'name' : name,
+                        'src' : url
+                    } );
+                }
             }
             else {
                 child_window = window.open( url, name );
@@ -323,6 +360,14 @@ function wait_for_rendering( callback, options ) {
                 
                 jq_target.find( 'script,iframe' ).remove();
                 
+                if ( OPTIONS.REMOVE_REISSUE_STRINGS ) {
+                    var jq_receipt_header = jq_target.find( 'b.h1' ),
+                        jq_reissue_receipt_date_label = jq_target.find( 'table:first table[align="center"]:first td[valign="top"][align="left"]:first b' );
+                    
+                    jq_receipt_header.text( jq_receipt_header.text().replace( /（再発行）/, '' ) );
+                    jq_reissue_receipt_date_label.text( jq_reissue_receipt_date_label.text().replace( /^再/, '' ) );
+                }
+                
                 callback( {
                     html : jq_target.html(),
                     is_timeover : is_timeover
@@ -371,7 +416,12 @@ function wait_for_rendering( callback, options ) {
 var TemplateLoadingDialog = {
     loading_icon_url : 'https://images-na.ssl-images-amazon.com/images/G/01/payments-portal/r1/loading-4x._CB338200758_.gif',
     
-    init : function () {
+    
+    init : function ( options ) {
+        if ( ! options ) {
+            options = {};
+        }
+        
         var self = this,
             jq_loading = $( '<div/>' ).addClass( SCRIPT_NAME + '-loading' ).css( {
                 'width' : '100%',
@@ -392,24 +442,149 @@ var TemplateLoadingDialog = {
         
         $( 'body' ).append( jq_loading_dialog );
         
+        if ( options.counter_required ) {
+            self.init_counter( options.max_number, options.initial_number );
+        }
+        
         return self;
-    },
+    }, // end of init()
+    
     
     show : function () {
         var self = this;
         
         self.jq_loading_dialog.show();
+        self.counter_show();
         
         return self;
-    },
+    }, // end of show()
+    
     
     hide : function () {
         var self = this;
         
+        self.counter_hide();
         self.jq_loading_dialog.hide();
         
         return self;
-    }
+    }, // end of hide()
+    
+    
+    init_counter : function ( max_number, initial_number ) {
+        if ( ! initial_number ) {
+            initial_number = 0;
+        }
+        
+        var self = this,
+            current_number = self.current_number = initial_number,
+            jq_counter = self.jq_counter = $( '<div/>' ).addClass( 'counter' ).css( {
+                'display' : 'none',
+                'position' : 'fixed',
+                'top' : '8px',
+                'right' : '8px',
+                'z-index' : '10001',
+                'min-width' : '100px',
+                'height' : '24px',
+                'padding' : '2px 4px',
+                'background' : 'white',
+                'text-align' : 'center',
+                'font-size' : '16px',
+                'font-weight' : 'bolder',
+                //'align-items' : 'center',
+                //'justify-content' : 'center'
+            } );
+        
+        self.max_number = max_number;
+        self.initial_number = initial_number;
+        
+        self.counter_update_display();
+        
+        $( 'body' ).append( jq_counter );
+        
+        return self;
+    }, // end of init_counter()
+    
+    
+    counter_reset : function () {
+        var self = this;
+        
+        self.current_number = self.initial_number;
+        
+        self.counter_update_display();
+        
+        return self;
+    }, // end of counter_reset()
+    
+    
+    counter_set : function ( number ) {
+        var self = this;
+        
+        self.current_number = number;
+        
+        self.counter_update_display();
+        
+        return self;
+    }, // end of counter_set()
+    
+    
+    counter_increment : function () {
+        var self = this;
+        
+        self.current_number ++;
+        
+        self.counter_update_display();
+        
+        return self;
+    }, // end of counter_increment()
+    
+    
+    counter_decrement : function () {
+        var self = this;
+        
+        self.current_number --;
+        
+        self.counter_update_display();
+        
+        return self;
+    }, // end of counter_decrement()
+    
+    
+    counter_update_display : function () {
+        var self = this,
+            counter_text = '' + self.current_number;
+        
+        if ( self.max_number ) {
+            counter_text += ' / ' + self.max_number;
+        }
+        
+        self.jq_counter.text( counter_text );
+        
+        return self;
+    }, // end of counter_update_display()
+    
+    
+    counter_show : function () {
+        var self = this;
+        
+        if ( self.jq_counter ) {
+            //self.jq_counter.css( 'display', 'flex' );
+            self.jq_counter.show();
+        }
+        
+        return self;
+    }, // end of counter_show()
+    
+    
+    counter_hide : function () {
+        var self = this;
+        
+        if ( self.jq_counter ) {
+            self.jq_counter.hide();
+        }
+        
+        return self;
+    } // end of counter_hide()
+    
 }; // end of TemplateLoadingDialog
 
 
@@ -569,11 +744,19 @@ var TemplateOrderHistoryFilter = {
             jq_select_month_option = $( '<option />' ).val( month_number ).text( month_number ).appendTo( jq_select_month );
         }
         
-        jq_select_month
-            .val( -1 )
-            .change( function ( event ) {
+        jq_select_month.val( -1 );
+        
+        if ( IS_EDGE ) {
+            // MS-Edge では、なぜか jQuery の change イベントが発火しない
+            jq_select_month[ 0 ].addEventListener( 'change', function ( event ) {
                 self.onchange_month( event );
             } );
+        }
+        else {
+            jq_select_month.change( function ( event ) {
+                self.onchange_month( event );
+            } );
+        }
         
         jq_checkbox_include_digital
             .prop( 'checked', filter_options.include_digital )
@@ -782,6 +965,15 @@ var TemplateOrderHistoryFilter = {
                 order_info.jq_order.hide();
             }
             
+            if ( IS_EDGE ) {
+                // MS-Edge で書影アイコンが二重に表示される→一つ目以外は隠す
+                order_info.jq_order.find( '.item-view-left-col-inner a.a-link-normal' ).each( function () {
+                    var jq_icon_link = $( this );
+                    
+                    jq_icon_link.find( 'img' ).slice( 1 ).hide();
+                } );
+            }
+            
             jq_insert_point.before( order_info.jq_order );
         } );
         
@@ -911,6 +1103,12 @@ var TemplateOrderHistoryFilter = {
             order_date_info.date = parseInt( RegExp.$3, 10 );
         }
         
+        if ( order_receipt_url ) {
+            // /ref=oh_aui_dpi_o*_ になっていると、まれにページが読み込まれないことがある
+            // → /ref=oh_aui_ajax_dpi に置換
+             order_receipt_url = order_receipt_url.replace( /\/ref=oh_aui_.*?\?/, '/ref=oh_aui_ajax_dpi?' );
+        }
+        
         individual_order_info = {
             order_date : order_date,
             order_date_info : order_date_info,
@@ -1033,7 +1231,7 @@ var TemplateOrderHistoryFilter = {
         if ( print_nondigital ) {
             var nondigital_first_order_url = nondigital_order_urls.shift();
            
-            open_child_window( nondigital_first_order_url, {
+            open_child_window( self.get_signin_url( nondigital_first_order_url ), {
                 open_parameters : {
                     first_order_url : nondigital_first_order_url,
                     additional_order_urls : nondigital_order_urls,
@@ -1045,7 +1243,7 @@ var TemplateOrderHistoryFilter = {
         if ( print_digital ) {
             var digital_first_order_url = digital_order_urls.shift();
            
-            open_child_window( digital_first_order_url, {
+            open_child_window( self.get_signin_url( digital_first_order_url ), {
                 open_parameters : {
                     first_order_url : digital_first_order_url,
                     additional_order_urls : digital_order_urls,
@@ -1055,7 +1253,35 @@ var TemplateOrderHistoryFilter = {
         }
         
         return self;
-    } // end of open_order_receipts_for_print()
+    }, // end of open_order_receipts_for_print()
+    
+    
+    // 領収書読込中に認証を要求されてしまう場合がある
+    // → 開始時に予め強制的に認証させる
+    // ※参考：[Final: OpenID Provider Authentication Policy Extension 1.0](http://openid.net/specs/openid-provider-authentication-policy-extension-1_0.html#anchor8)
+    get_signin_url : ( function () {
+        var signin_base_url = [
+                'https://www.amazon.co.jp/ap/signin?_encoding=UTF8',
+                'accountStatusPolicy=P1',
+                'showRmrMe=1',
+                'openid.assoc_handle=jpflex',
+                'openid.claimed_id=' + encodeURIComponent( 'http://specs.openid.net/auth/2.0/identifier_select' ),
+                'openid.identity=' + encodeURIComponent( 'http://specs.openid.net/auth/2.0/identifier_select' ),
+                'openid.mode=checkid_setup',
+                'openid.ns=' + encodeURIComponent( 'http://specs.openid.net/auth/2.0' ),
+                'openid.ns.pape=' + encodeURIComponent( 'http://specs.openid.net/extensions/pape/1.0' ),
+                'openid.pape.max_auth_age=0', // 認証有効時間(秒)（デフォルトは 900、0 だと強制的に認証用のログイン画面が開く）
+                'openid.return_to='
+            ].join( '&' );
+        
+        return function ( return_to_url ) {
+            var signin_page_url = signin_base_url + encodeURIComponent( get_absolute_url( return_to_url ) );
+            
+            log_debug( '** signin_page_url =', signin_page_url );
+            
+            return signin_page_url;
+        };
+    } )() // end of get_signin_url()
 
 }; // end of TemplateOrderHistoryFilter
 
@@ -1093,12 +1319,21 @@ function init_first_order_page( open_parameters ) {
         return;
     }
     
-    var loading_dialog = object_extender( TemplateLoadingDialog ).init().show(),
+    var loading_dialog = object_extender( TemplateLoadingDialog ).init( {
+            counter_required : true,
+            max_number : 1 + open_parameters.additional_order_urls.length
+        } ).show(),
+        
         result_waiting_counter = 1 + open_parameters.additional_order_urls.length,
         current_receipt_number = 1,
         remaining_request_order_urls = open_parameters.additional_order_urls.slice( 0 ),
-        max_request_number = 10,
+        limit_parallel_request_number = 10,
         request_counter = 0,
+        
+        is_reloading = false,
+        
+        timeout_ms = 60000,
+        timeout_timer_id = setTimeout( on_timeout, timeout_ms ),
         
         jq_body = $( 'body' ),
         jq_header_template = $( '<h2 class="receipt"><a/></h2>' ),
@@ -1120,25 +1355,63 @@ function init_first_order_page( open_parameters ) {
             return $( '<div/>' ).html( html ).prepend( create_jq_header( receipt_number, receipt_url ) ).prepend( jq_hr_template.clone() ).children();
         }, // end of create_jq_elements()
         
+        
+        call_by_iframe = function ( request_order_url, receipt_number, existing_window ) {
+            var child_window = open_child_window( request_order_url, {
+                    is_iframe : true,
+                    existing_window : existing_window,
+                    open_parameters : {
+                        first_order_url : open_parameters.first_order_url,
+                        request_order_url : request_order_url
+                    }
+                } );
+            
+            url_to_page_info[ request_order_url ] = {
+                receipt_number : receipt_number,
+                child_window : child_window
+            };
+        }, // end of call_by_iframe()
+        
+        
         on_rendering_complete = function ( html ) {
             log_debug( '*** on_rendering_complete: result_waiting_counter=', result_waiting_counter );
+            
+            if ( timeout_timer_id ) {
+                clearTimeout( timeout_timer_id );
+            }
+            timeout_timer_id = setTimeout( on_timeout, timeout_ms );
             
             var page_info = url_to_page_info[ open_parameters.first_order_url ];
             
             page_info.html = html;
             page_info.jq_elements = create_jq_elements( html, page_info.receipt_number, open_parameters.first_order_url );
             
+            loading_dialog.counter_increment();
             result_waiting_counter --;
+            
+            if ( OPTIONS.REMOVE_REISSUE_STRINGS ) {
+                var jq_receipt_header = jq_body.find( 'b.h1' ),
+                    jq_reissue_receipt_date_label = jq_body.find( 'table:first table[align="center"]:first td[valign="top"][align="left"]:first b' );
+                
+                jq_receipt_header.text( jq_receipt_header.text().replace( /（再発行）/, '' ) );
+                jq_reissue_receipt_date_label.text( jq_reissue_receipt_date_label.text().replace( /^再/, '' ) );
+            }
             
             if ( result_waiting_counter <= 0 ) {
                 finish();
             }
         }, // end of on_rendering_complete()
         
+        
         on_receive_message = function ( jq_event ) {
             var event = jq_event.originalEvent;
             
             log_debug( '*** on_receive_message: result_waiting_counter=', result_waiting_counter, 'event=', event );
+            
+            if ( timeout_timer_id ) {
+                clearTimeout( timeout_timer_id );
+            }
+            timeout_timer_id = setTimeout( on_timeout, timeout_ms );
             
             if ( event.origin != get_origin_url() ) {
                 log_error( 'origin error:', event.origin );
@@ -1157,15 +1430,24 @@ function init_first_order_page( open_parameters ) {
             if ( event.data.error ) {
                 log_error( event.data.error_message );
                 
-                if ( event.data.signin_request ) {
-                    window.location.repload( true );
-                    return;
+                if ( ( ! is_reloading ) && event.data.signin_request ) {
+                    log_error( 'sign-in required' );
+                    
+                    loading_dialog.hide();
+                    
+                    is_reloading = true;
+                    
+                    if ( confirm( OPTIONS.LOGIN_REQUIRED_MESSAGE ) ) {
+                        window.location.reload( true );
+                        return;
+                    }
                 }
             }
             
             page_info.html = event.data.html;
             page_info.jq_elements = create_jq_elements( event.data.html, page_info.receipt_number, request_order_url );
             
+            loading_dialog.counter_increment();
             result_waiting_counter --;
             
             if ( result_waiting_counter <= 0 ) {
@@ -1180,22 +1462,31 @@ function init_first_order_page( open_parameters ) {
             
             current_receipt_number ++;
             
-            var child_window = open_child_window( request_order_url, {
-                    is_iframe : true,
-                    existing_window : page_info.child_window,
-                    open_parameters : {
-                        first_order_url : open_parameters.first_order_url,
-                        request_order_url : request_order_url
-                    }
-                } );
-            
-            url_to_page_info[ request_order_url ] = {
-                receipt_number : current_receipt_number,
-                child_window : child_window
-            };
+            call_by_iframe( request_order_url, current_receipt_number, page_info.child_window );
         }, // end of on_receive_message()
         
+        
+        on_timeout = function () {
+            log_error( 'receipt read timeout' );
+            
+            loading_dialog.hide();
+            
+            if ( ! is_reloading ) {
+                is_reloading = true;
+                
+                if ( confirm( OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE ) ) {
+                    window.location.reload( true );
+                }
+            }
+        }, // end of on_timeout()
+        
+        
         finish = function () {
+            if ( timeout_timer_id ) {
+                clearTimeout( timeout_timer_id ) ;
+                timeout_timer_id = null;
+            }
+            
             open_parameters.additional_order_urls.forEach( function ( additional_order_url ) {
                 jq_body.append( url_to_page_info[ additional_order_url ].jq_elements );
             } );
@@ -1227,7 +1518,7 @@ function init_first_order_page( open_parameters ) {
         receipt_number : current_receipt_number
     };
     
-    for ( request_counter = 0; request_counter < max_request_number; request_counter ++ ) {
+    for ( request_counter = 0; request_counter < limit_parallel_request_number; request_counter ++ ) {
         var request_order_url = remaining_request_order_urls.shift();
         
         if ( ! request_order_url ) {
@@ -1236,18 +1527,7 @@ function init_first_order_page( open_parameters ) {
         
         current_receipt_number ++;
         
-        var child_window = open_child_window( request_order_url, {
-                is_iframe : true,
-                open_parameters : {
-                    first_order_url : open_parameters.first_order_url,
-                    request_order_url : request_order_url
-                }
-            } );
-        
-        url_to_page_info[ request_order_url ] = {
-            receipt_number : current_receipt_number,
-            child_window : child_window
-        };
+        call_by_iframe( request_order_url, current_receipt_number );
     }
     
     wait_for_rendering( function ( result ) {
@@ -1307,6 +1587,7 @@ function initialize( user_options ) {
             
             try {
                 open_parameters = JSON.parse( window.name );
+                // TODO: MS-Edge 版 Tampermonkey だと、子 の window.name が undefined となってしまう
                 
                 if ( ! open_parameters ) {
                     return {};
