@@ -20,12 +20,14 @@
     [License | jQuery Foundation](https://jquery.org/license/)
 
 ■ 関連記事など
+- [【アマゾン注文履歴フィルタ】Kindle 等のデジタルコンテンツの領収書をまとめて表示する拡張機能／アドオン／ユーザースクリプト](http://furyu.hatenablog.com/entry/amzOrderHistoryFilter)
+- [furyutei/amzOrderHistoryFilter](https://github.com/furyutei/amzOrderHistoryFilter)
 */
 
 /*
 The MIT License (MIT)
 
-Copyright (c) 2016 furyu <furyutei@gmail.com>
+Copyright (c) 2018 furyu <furyutei@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1270,7 +1272,7 @@ var TemplateOrderHistoryFilter = {
                 'openid.mode=checkid_setup',
                 'openid.ns=' + encodeURIComponent( 'http://specs.openid.net/auth/2.0' ),
                 'openid.ns.pape=' + encodeURIComponent( 'http://specs.openid.net/extensions/pape/1.0' ),
-                'openid.pape.max_auth_age=0', // 認証有効時間(秒)（デフォルトは 900、0 だと強制的に認証用のログイン画面が開く）
+                'openid.pape.max_auth_age=0', // 認証有効時間(秒)（元の値は 900 → 0 の場合、強制的に認証用のログイン画面が開く）
                 'openid.return_to='
             ].join( '&' );
         
@@ -1284,6 +1286,272 @@ var TemplateOrderHistoryFilter = {
     } )() // end of get_signin_url()
 
 }; // end of TemplateOrderHistoryFilter
+
+
+var TemplateReceiptOutputPage = {
+    timeout_ms : 60000,
+    limit_parallel_request_number : 10,
+    
+    jq_header_template : $( '<h2 class="receipt"><a/></h2>' ),
+    jq_hr_template : $( '<hr class="receipt"/>' ),
+    
+    init : function ( open_parameters ) {
+        var self = this,
+            loading_dialog = self.loading_dialog = object_extender( TemplateLoadingDialog ).init( {
+                counter_required : true,
+                max_number : 1 + open_parameters.additional_order_urls.length
+            } ).show(),
+            jq_body = self.jq_body = $( 'body' ),
+            
+            url_to_page_info = self.url_to_page_info = {},
+            
+            remaining_request_order_urls = self.remaining_request_order_urls = open_parameters.additional_order_urls.slice( 0 );
+        
+        self.open_parameters = open_parameters;
+        self.result_waiting_counter = 1 + open_parameters.additional_order_urls.length;
+        self.current_receipt_number = 1;
+        self.request_counter = 0;
+        
+        self.is_reloading = false;
+        
+        self.timeout_timer_id = null;
+        self.reset_timeout_timer();
+        
+        
+        $( '<style type="text/css"/>' )
+            .text( [
+                'h2.receipt a {font-size:14px;}',
+                '@media print {',
+                '  h2.receipt { display: none; }',
+                '  hr.receipt { page-break-after: always; margin: 0 0 0 0; padding: 0 0 0 0; height: 0; border: none; visibility: hidden; }',
+                '}'
+            ].join( '\n' ) )
+            .appendTo( $( 'head' ) );
+        
+        self.create_jq_header( self.current_receipt_number, open_parameters.first_order_url ).prependTo( jq_body );
+        
+        $( window ).on( 'message', function ( event ) {
+            self.on_receive_message( event );
+        } );
+        
+        url_to_page_info[ open_parameters.first_order_url ] = {
+            receipt_number : self.current_receipt_number
+        };
+        
+        for ( self.request_counter = 0; self.request_counter < self.limit_parallel_request_number; self.request_counter ++ ) {
+            var request_order_url = remaining_request_order_urls.shift();
+            
+            if ( ! request_order_url ) {
+                break;
+            }
+            
+            self.current_receipt_number ++;
+            
+            self.call_by_iframe( request_order_url, self.current_receipt_number );
+        }
+        
+        wait_for_rendering( function ( result ) {
+            self.on_rendering_complete( result.html );
+        } );
+        
+        return self;
+    }, // end of init()
+    
+    
+    reset_timeout_timer : function () {
+        var self = this;
+        
+        if ( self.timeout_timer_id ) {
+            clearTimeout( self.timeout_timer_id );
+        }
+        
+        self.timeout_timer_id = setTimeout( function () {
+            self.on_timeout();
+        }, self.timeout_ms );
+        
+        return self;
+    }, // end of reset_timeout_timer()
+    
+    
+    create_jq_header : function ( receipt_number, receipt_url ) {
+        var self = this,
+            jq_header = self.jq_header_template.clone(),
+            jq_link = jq_header.find( 'a' ).attr( {
+                'href' : receipt_url,
+                'target' : '_blank'
+            } ).text( 'No.' + receipt_number );
+        
+        return jq_header;
+    }, // end of create_jq_header()
+    
+    
+    create_jq_elements : function ( html, receipt_number, receipt_url ) {
+        var self = this;
+        
+        return $( '<div/>' ).html( html ).prepend( self.create_jq_header( receipt_number, receipt_url ) ).prepend( self.jq_hr_template.clone() ).children();
+    }, // end of create_jq_elements()
+    
+    
+    call_by_iframe : function ( request_order_url, receipt_number, existing_window ) {
+        var self = this,
+            child_window = open_child_window( request_order_url, {
+                is_iframe : true,
+                existing_window : existing_window,
+                open_parameters : {
+                    first_order_url : self.open_parameters.first_order_url,
+                    request_order_url : request_order_url
+                }
+            } );
+        
+        self.url_to_page_info[ request_order_url ] = {
+            receipt_number : receipt_number,
+            child_window : child_window
+        };
+        
+        return self;
+    }, // end of call_by_iframe()
+    
+    
+    on_rendering_complete : function ( html ) {
+        var self = this,
+            open_parameters = self.open_parameters,
+            jq_body = self.jq_body,
+            page_info = self.url_to_page_info[ open_parameters.first_order_url ];
+        
+        log_debug( '*** on_rendering_complete: result_waiting_counter=', self.result_waiting_counter );
+        
+        self.reset_timeout_timer();
+        
+        page_info.html = html;
+        page_info.jq_elements = self.create_jq_elements( html, page_info.receipt_number, open_parameters.first_order_url );
+        
+        self.loading_dialog.counter_increment();
+        self.result_waiting_counter --;
+        
+        if ( OPTIONS.REMOVE_REISSUE_STRINGS ) {
+            var jq_receipt_header = jq_body.find( 'b.h1' ),
+                jq_reissue_receipt_date_label = jq_body.find( 'table:first table[align="center"]:first td[valign="top"][align="left"]:first b' );
+            
+            jq_receipt_header.text( jq_receipt_header.text().replace( /（再発行）/, '' ) );
+            jq_reissue_receipt_date_label.text( jq_reissue_receipt_date_label.text().replace( /^再/, '' ) );
+        }
+        
+        if ( self.result_waiting_counter <= 0 ) {
+            self.finish();
+        }
+        
+        return self;
+    }, // end of on_rendering_complete()
+    
+    
+    on_receive_message : function ( jq_event ) {
+        var self = this,
+            event = jq_event.originalEvent,
+            url_to_page_info = self.url_to_page_info;
+        
+        log_debug( '*** on_receive_message: result_waiting_counter=', self.result_waiting_counter, 'event=', event );
+        
+        self.reset_timeout_timer();
+        
+        if ( event.origin != get_origin_url() ) {
+            log_error( 'origin error:', event.origin );
+            return;
+        }
+        
+        var error = event.data.error,
+            signin_request = event.data.signin_request,
+            request_order_url = event.data.request_order_url,
+            page_info = self.url_to_page_info[ request_order_url ];
+        
+        if ( ! page_info ) {
+            return;
+        }
+        
+        if ( event.data.error ) {
+            log_error( event.data.error_message );
+            
+            if ( ( ! self.is_reloading ) && event.data.signin_request ) {
+                log_error( 'sign-in required' );
+                
+                self.loading_dialog.hide();
+                
+                self.is_reloading = true;
+                
+                if ( confirm( OPTIONS.LOGIN_REQUIRED_MESSAGE ) ) {
+                    window.location.reload( true );
+                    return;
+                }
+            }
+        }
+        
+        page_info.html = event.data.html;
+        page_info.jq_elements = self.create_jq_elements( event.data.html, page_info.receipt_number, request_order_url );
+        
+        self.loading_dialog.counter_increment();
+        self.result_waiting_counter --;
+        
+        if ( self.result_waiting_counter <= 0 ) {
+            self.finish();
+        }
+        
+        request_order_url = self.remaining_request_order_urls.shift();
+        
+        if ( ! request_order_url ) {
+            return;
+        }
+        
+        self.current_receipt_number ++;
+        
+        self.call_by_iframe( request_order_url, self.current_receipt_number, page_info.child_window );
+        
+        return self;
+    }, // end of on_receive_message()
+    
+    
+    on_timeout : function () {
+        var self = this;
+        
+        log_error( 'receipt read timeout' );
+        
+        self.loading_dialog.hide();
+        
+        if ( ! self.is_reloading ) {
+            self.is_reloading = true;
+            
+            if ( confirm( OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE ) ) {
+                window.location.reload( true );
+            }
+        }
+    }, // end of on_timeout()
+    
+    
+    finish :  function () {
+        var self = this,
+            open_parameters = self.open_parameters,
+            jq_body = self.jq_body,
+            url_to_page_info = self.url_to_page_info;
+        
+        if ( self.timeout_timer_id ) {
+            clearTimeout( self.timeout_timer_id ) ;
+            self.timeout_timer_id = null;
+        }
+        
+        open_parameters.additional_order_urls.forEach( function ( additional_order_url ) {
+            jq_body.append( url_to_page_info[ additional_order_url ].jq_elements );
+        } );
+        
+        self.loading_dialog.hide();
+        
+        if ( open_parameters.show_print_dialog ) {
+            if ( OPTIONS.OPEN_PRINT_DIALOG_AUTO ) {
+                window.print();
+            }
+        }
+        
+        return self;
+    } // end of finish()
+
+}; // end of TemplateReceiptOutputPage
 
 // }
 
@@ -1319,221 +1587,8 @@ function init_first_order_page( open_parameters ) {
         return;
     }
     
-    var loading_dialog = object_extender( TemplateLoadingDialog ).init( {
-            counter_required : true,
-            max_number : 1 + open_parameters.additional_order_urls.length
-        } ).show(),
-        
-        result_waiting_counter = 1 + open_parameters.additional_order_urls.length,
-        current_receipt_number = 1,
-        remaining_request_order_urls = open_parameters.additional_order_urls.slice( 0 ),
-        limit_parallel_request_number = 10,
-        request_counter = 0,
-        
-        is_reloading = false,
-        
-        timeout_ms = 60000,
-        timeout_timer_id = setTimeout( on_timeout, timeout_ms ),
-        
-        jq_body = $( 'body' ),
-        jq_header_template = $( '<h2 class="receipt"><a/></h2>' ),
-        jq_hr_template = $( '<hr class="receipt"/>' ),
-        
-        url_to_page_info = {},
-        
-        create_jq_header = function ( receipt_number, receipt_url ) {
-            var jq_header = jq_header_template.clone(),
-                jq_link = jq_header.find( 'a' ).attr( {
-                    'href' : receipt_url,
-                    'target' : '_blank'
-                } ).text( 'No.' + receipt_number );
-            
-            return jq_header;
-        }, // end of create_jq_header()
-        
-        create_jq_elements = function ( html, receipt_number, receipt_url ) {
-            return $( '<div/>' ).html( html ).prepend( create_jq_header( receipt_number, receipt_url ) ).prepend( jq_hr_template.clone() ).children();
-        }, // end of create_jq_elements()
-        
-        
-        call_by_iframe = function ( request_order_url, receipt_number, existing_window ) {
-            var child_window = open_child_window( request_order_url, {
-                    is_iframe : true,
-                    existing_window : existing_window,
-                    open_parameters : {
-                        first_order_url : open_parameters.first_order_url,
-                        request_order_url : request_order_url
-                    }
-                } );
-            
-            url_to_page_info[ request_order_url ] = {
-                receipt_number : receipt_number,
-                child_window : child_window
-            };
-        }, // end of call_by_iframe()
-        
-        
-        on_rendering_complete = function ( html ) {
-            log_debug( '*** on_rendering_complete: result_waiting_counter=', result_waiting_counter );
-            
-            if ( timeout_timer_id ) {
-                clearTimeout( timeout_timer_id );
-            }
-            timeout_timer_id = setTimeout( on_timeout, timeout_ms );
-            
-            var page_info = url_to_page_info[ open_parameters.first_order_url ];
-            
-            page_info.html = html;
-            page_info.jq_elements = create_jq_elements( html, page_info.receipt_number, open_parameters.first_order_url );
-            
-            loading_dialog.counter_increment();
-            result_waiting_counter --;
-            
-            if ( OPTIONS.REMOVE_REISSUE_STRINGS ) {
-                var jq_receipt_header = jq_body.find( 'b.h1' ),
-                    jq_reissue_receipt_date_label = jq_body.find( 'table:first table[align="center"]:first td[valign="top"][align="left"]:first b' );
-                
-                jq_receipt_header.text( jq_receipt_header.text().replace( /（再発行）/, '' ) );
-                jq_reissue_receipt_date_label.text( jq_reissue_receipt_date_label.text().replace( /^再/, '' ) );
-            }
-            
-            if ( result_waiting_counter <= 0 ) {
-                finish();
-            }
-        }, // end of on_rendering_complete()
-        
-        
-        on_receive_message = function ( jq_event ) {
-            var event = jq_event.originalEvent;
-            
-            log_debug( '*** on_receive_message: result_waiting_counter=', result_waiting_counter, 'event=', event );
-            
-            if ( timeout_timer_id ) {
-                clearTimeout( timeout_timer_id );
-            }
-            timeout_timer_id = setTimeout( on_timeout, timeout_ms );
-            
-            if ( event.origin != get_origin_url() ) {
-                log_error( 'origin error:', event.origin );
-                return;
-            }
-            
-            var error = event.data.error,
-                signin_request = event.data.signin_request,
-                request_order_url = event.data.request_order_url,
-                page_info = url_to_page_info[ request_order_url ];
-            
-            if ( ! page_info ) {
-                return;
-            }
-            
-            if ( event.data.error ) {
-                log_error( event.data.error_message );
-                
-                if ( ( ! is_reloading ) && event.data.signin_request ) {
-                    log_error( 'sign-in required' );
-                    
-                    loading_dialog.hide();
-                    
-                    is_reloading = true;
-                    
-                    if ( confirm( OPTIONS.LOGIN_REQUIRED_MESSAGE ) ) {
-                        window.location.reload( true );
-                        return;
-                    }
-                }
-            }
-            
-            page_info.html = event.data.html;
-            page_info.jq_elements = create_jq_elements( event.data.html, page_info.receipt_number, request_order_url );
-            
-            loading_dialog.counter_increment();
-            result_waiting_counter --;
-            
-            if ( result_waiting_counter <= 0 ) {
-                finish();
-            }
-            
-            request_order_url = remaining_request_order_urls.shift();
-            
-            if ( ! request_order_url ) {
-                return;
-            }
-            
-            current_receipt_number ++;
-            
-            call_by_iframe( request_order_url, current_receipt_number, page_info.child_window );
-        }, // end of on_receive_message()
-        
-        
-        on_timeout = function () {
-            log_error( 'receipt read timeout' );
-            
-            loading_dialog.hide();
-            
-            if ( ! is_reloading ) {
-                is_reloading = true;
-                
-                if ( confirm( OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE ) ) {
-                    window.location.reload( true );
-                }
-            }
-        }, // end of on_timeout()
-        
-        
-        finish = function () {
-            if ( timeout_timer_id ) {
-                clearTimeout( timeout_timer_id ) ;
-                timeout_timer_id = null;
-            }
-            
-            open_parameters.additional_order_urls.forEach( function ( additional_order_url ) {
-                jq_body.append( url_to_page_info[ additional_order_url ].jq_elements );
-            } );
-            
-            loading_dialog.hide();
-            
-            if ( open_parameters.show_print_dialog ) {
-                if ( OPTIONS.OPEN_PRINT_DIALOG_AUTO ) {
-                    window.print();
-                }
-            }
-        }; // end of finish()
-    
-    $( '<style type="text/css"/>' )
-        .text( [
-            'h2.receipt a {font-size:14px;}',
-            '@media print {',
-            '  h2.receipt { display: none; }',
-            '  hr.receipt { page-break-after: always; margin: 0 0 0 0; padding: 0 0 0 0; height: 0; border: none; visibility: hidden; }',
-            '}'
-        ].join( '\n' ) )
-        .appendTo( $( 'head' ) );
-    
-    create_jq_header( current_receipt_number, open_parameters.first_order_url ).prependTo( jq_body );
-    
-    $( window ).on( 'message', on_receive_message );
-    
-    url_to_page_info[ open_parameters.first_order_url ] = {
-        receipt_number : current_receipt_number
-    };
-    
-    for ( request_counter = 0; request_counter < limit_parallel_request_number; request_counter ++ ) {
-        var request_order_url = remaining_request_order_urls.shift();
-        
-        if ( ! request_order_url ) {
-            break;
-        }
-        
-        current_receipt_number ++;
-        
-        call_by_iframe( request_order_url, current_receipt_number );
-    }
-    
-    wait_for_rendering( function ( result ) {
-        on_rendering_complete( result.html );
-    } );
-    
+    object_extender( TemplateReceiptOutputPage ).init( open_parameters );
+
 } // end of init_first_order_page()
 
 
