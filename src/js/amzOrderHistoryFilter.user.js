@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.5
+// @version         0.1.0.6
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
@@ -57,6 +57,8 @@ THE SOFTWARE.
 var OPTIONS = {
     OPEN_PRINT_DIALOG_AUTO : false, // true: 印刷ダイアログを自動で起動
     REMOVE_REISSUE_STRINGS : false, // true: 「再発行」を取り除く
+    ADDRESSEE_CHANGEABLE : true, // true: 宛名を設定・変更可
+    ENABLE_PRINT_PREVIEW_BUTTON : true, // true: 印刷プレビューボタンを表示(Firefox用)
     
     DEFAULT_FILTER_INCLUDE_DIGITAL : true, // フィルタ対象(デジタルコンテンツ)のデフォルト値(true: 有効)
     DEFAULT_FILTER_INCLUDE_NONDIGITAL : false, // フィルタ対象(デジタルコンテンツ以外)のデフォルト値(true: 有効)
@@ -105,6 +107,9 @@ OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = '領収書印刷用画面';
 OPTIONS.LOGIN_REQUIRED_MESSAGE = 'サーバー側よりログインが要求されましたので、取得を中止します。';
 OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE = '応答がないままタイムアウトしました。領収書の取得を最初からやり直します。';
 OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT = '注文履歴CSV(参考用)ダウンロード';
+OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT = '宛名変更';
+OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE = '宛名を指定してください';
+OPTIONS.PRINT_PREVIEW_BUTTON_TEXT = '印刷プレビュー';
 
 
 // }
@@ -1395,12 +1400,19 @@ var TemplateReceiptOutputPage = {
                 counter_required : true,
                 max_number : 1 + open_parameters.additional_order_urls.length
             } ).show(),
+            
             jq_body = self.jq_body = $( 'body' ),
             
             url_to_page_info = self.url_to_page_info = {},
             
+            addressee = get_value( SCRIPT_NAME + '-addressee' ),
+            
             remaining_request_order_urls = self.remaining_request_order_urls = open_parameters.additional_order_urls.slice( 0 );
         
+        if ( OPTIONS.ADDRESSEE_CHANGEABLE ) {
+            self.addressee = ( addressee ) ? addressee : '';
+        }
+            
         self.open_parameters = open_parameters;
         self.result_waiting_counter = 1 + open_parameters.additional_order_urls.length;
         self.current_receipt_number = 1;
@@ -1419,7 +1431,10 @@ var TemplateReceiptOutputPage = {
                 '@media print {',
                 '  .noprint { display: none; }',
                 '  hr.receipt { page-break-after: always; margin: 0 0 0 0; padding: 0 0 0 0; height: 0; border: none; visibility: hidden; }',
-                '}'
+                '}',
+                'td.addressee-container {position: relative;}',
+                'div.addressee {position: absolute; width: 200%; bottom: 3px; right: 16px; font-size: 14px; text-align: right;}',
+                'div.addressee.digital {bottom: 6px; right: 24px; font-size: 16px;}'
             ].join( '\n' ) )
             .appendTo( $( 'head' ) );
         
@@ -1480,10 +1495,44 @@ var TemplateReceiptOutputPage = {
     }, // end of create_jq_header()
     
     
-    create_jq_receipt_body : function ( html, receipt_number, receipt_url ) {
+    insert_jq_addressee : function ( jq_receipt_body ) {
         var self = this;
         
-        return $( '<div/>' ).html( html ).prepend( self.create_jq_header( receipt_number, receipt_url ) ).prepend( self.jq_hr_template.clone() );
+        if ( ! OPTIONS.ADDRESSEE_CHANGEABLE ) {
+            return self;
+        }
+        
+        var jq_addressee = $( '<div class="addressee"/>' );
+        
+        if ( self.open_parameters.is_digital ) {
+            jq_addressee.addClass( 'digital' );
+        }
+        
+        if ( self.addressee ) {
+            jq_addressee.text( self.addressee );
+        }
+        
+        jq_receipt_body
+            .find( 'table:first td[align="right"]:first' )
+            .addClass( 'addressee-container' )
+            .append( jq_addressee );
+        
+        return self;
+    }, // end of create_jq_addressee()
+    
+    
+    create_jq_receipt_body : function ( html, receipt_number, receipt_url ) {
+        var self = this,
+            jq_receipt_body = $( '<div/>' );
+        
+        jq_receipt_body
+            .html( html )
+            .prepend( self.create_jq_header( receipt_number, receipt_url ) )
+            .prepend( self.jq_hr_template.clone() );
+        
+        self.insert_jq_addressee( jq_receipt_body );
+        
+        return jq_receipt_body;
     }, // end of create_jq_receipt_body()
     
     
@@ -1531,6 +1580,8 @@ var TemplateReceiptOutputPage = {
             jq_receipt_header.text( jq_receipt_header.text().replace( /（再発行）/, '' ) );
             jq_reissue_receipt_date_label.text( jq_reissue_receipt_date_label.text().replace( /^再/, '' ) );
         }
+        
+        self.insert_jq_addressee( jq_body );
         
         if ( self.result_waiting_counter <= 0 ) {
             self.finish();
@@ -1638,6 +1689,13 @@ var TemplateReceiptOutputPage = {
         var self = this,
             open_parameters = self.open_parameters,
             jq_body = self.jq_body,
+            jq_toolbox = $( '<div class="toolbox noprint"/>' ).css( {
+                'position' : 'fixed',
+                'top' : '8px',
+                'right' : '8px',
+                'background' : 'rgba( 255, 255, 224, 0.5 )',
+                'padding' : '4px'
+            } ).appendTo( jq_body ),
             url_to_page_info = self.url_to_page_info;
         
         if ( self.timeout_timer_id ) {
@@ -1649,7 +1707,9 @@ var TemplateReceiptOutputPage = {
             jq_body.append( url_to_page_info[ additional_order_url ].jq_receipt_body.children() );
         } );
         
-        self.create_csv_download_button();
+        self.create_csv_download_button( jq_toolbox );
+        self.create_change_addressee_button( jq_toolbox );
+        self.create_print_preview_button( jq_toolbox );
         
         self.loading_dialog.hide();
         
@@ -2019,7 +2079,7 @@ var TemplateReceiptOutputPage = {
     }, // end of get_price_number()
     
     
-    create_csv_download_button : function () {
+    create_csv_download_button : function ( jq_parent ) {
         var self = this,
             jq_csv_download_button = self.jq_csv_download_button = $( '<button class="noprint"/>' );
         
@@ -2027,15 +2087,13 @@ var TemplateReceiptOutputPage = {
             .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
             .text( OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT )
             .css( {
-                'position' : 'fixed',
-                'top' : '8px',
-                'right' : '16px',
+                'margin' : '4px',
                 'cursor' : 'pointer'
             } )
             .click( function ( event ) {
                 self.onclick_csv_download_button( event );
             } )
-            .prependTo( self.jq_body );
+            .prependTo( jq_parent );
         
         return self;
     }, // end of create_csv_download_button()
@@ -2175,7 +2233,96 @@ var TemplateReceiptOutputPage = {
         } );
         
         return output_csv_columns.join( ',' );
-    }
+    }, // end of create_csv_line()
+    
+    
+    create_change_addressee_button : function ( jq_parent ) {
+        var self = this;
+        
+        if ( ! OPTIONS.ADDRESSEE_CHANGEABLE ) {
+            return self;
+        }
+        
+        var jq_change_addressee_button = self.jq_change_addressee_button = $( '<button class="noprint"/>' );
+        
+        jq_change_addressee_button
+            .attr( 'id', SCRIPT_NAME + '-change-addressee-button' )
+            .text( OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT )
+            .css( {
+                'margin' : '4px',
+                'cursor' : 'pointer'
+            } )
+            .click( function ( event ) {
+                self.onclick_change_addressee_button( event );
+            } )
+            .prependTo( jq_parent );
+        
+        return self;
+    }, // end of create_change_addressee_button()
+    
+    
+    onclick_change_addressee_button : function ( event ) {
+        var self = this,
+            new_addressee;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        new_addressee = prompt( OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE, self.addressee );
+        
+        if ( ( new_addressee === null ) || ( new_addressee === self.addressee ) ) {
+            return self;
+        }
+        
+        self.addressee = new_addressee;
+        set_value( SCRIPT_NAME + '-addressee', self.addressee );
+        
+        self.jq_body.find( '.addressee' ).text( new_addressee );
+        
+        return self;
+    }, // end of onclick_change_addressee_button()
+    
+    
+    create_print_preview_button : function ( jq_parent ) {
+        var self = this;
+        
+        if ( ( ! OPTIONS.ENABLE_PRINT_PREVIEW_BUTTON ) || ( ! IS_FIREFOX ) || ( ! IS_WEB_EXTENSION ) ) {
+            return self;
+        }
+        
+        var jq_print_preview_button = self.jq_print_preview_button = $( '<button class="noprint"/>' );
+        
+        jq_print_preview_button
+            .attr( 'id', SCRIPT_NAME + '-print-preview-button' )
+            .text( OPTIONS.PRINT_PREVIEW_BUTTON_TEXT )
+            .css( {
+                'margin' : '4px',
+                'cursor' : 'pointer'
+            } )
+            .click( function ( event ) {
+                self.onclick_print_preview_button( event );
+            } )
+            .prependTo( jq_parent );
+        
+        return self;
+    }, // end of create_print_preview_button()
+    
+    
+    onclick_print_preview_button : function ( event ) {
+        var self = this,
+            new_addressee;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        browser.runtime.sendMessage( {
+            type : 'PRINT_PREVIEW_REQUEST'
+        }, function ( response ) {
+            log_debug( response );
+        } );
+        
+        return self;
+    } // end of onclick_print_preview_button()
 
 }; // end of TemplateReceiptOutputPage
 
