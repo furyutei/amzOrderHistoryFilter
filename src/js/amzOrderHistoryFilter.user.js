@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.4
+// @version         0.1.0.5
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
@@ -98,6 +98,9 @@ OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT = 'デジタル以外';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT = '予約分を含む';
 OPTIONS.COUNTER_LABEL_DIGITAL_TEXT = 'デジタル';
 OPTIONS.COUNTER_LABEL_NONDIGITAL_TEXT = 'デジタル以外';
+OPTIONS.SELECT_DESTINATION_LABEL_TEXT = 'お届け先';
+OPTIONS.SELECT_DESTINATION_ALL_TEXT = '全て';
+OPTIONS.SELECT_DESTINATION_NON_TEXT = '宛先無し'; // TODO: 宛先無しのときに適切なキーがわからないため保留（住所の氏名欄は割と何でも受け付けてしまうため、被らないのが思いつかない）
 OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = '領収書印刷用画面';
 OPTIONS.LOGIN_REQUIRED_MESSAGE = 'サーバー側よりログインが要求されましたので、取得を中止します。';
 OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE = '応答がないままタイムアウトしました。領収書の取得を最初からやり直します。';
@@ -599,6 +602,7 @@ var TemplateOrderHistoryFilter = {
         '    <label><input name="include-digital" type="checkbox" /><span class="include-digital-label label"></span></label>',
         '    <label><input name="include-nondigital" type="checkbox" /><span class="include-nondigital-label label"></span></label>',
         '    <label>(<input name="include-reservation" type="checkbox" /><span class="include-reservation-label label"></span>)</label>',
+        '    <label><span class="destination-label label"></span><select name="destination"></select></label>',
         '  </div>',
         '  <div class="message"></div>',
         '  <div class="operation-container">',
@@ -637,6 +641,7 @@ var TemplateOrderHistoryFilter = {
             order_information = self.order_information = {
                 is_ready : false,
                 month_order_info_lists : {},
+                destination_infos : {},
                 current_order_info_list : []
             },
             loading_dialog = self.loading_dialog = object_extender( TemplateLoadingDialog ).init();
@@ -679,6 +684,7 @@ var TemplateOrderHistoryFilter = {
             } ),
             
             jq_parameter_container = jq_filter_control.find( '.parameter-container' ).css( {
+                'max-width' : '500px'
             } ),
             jq_select_month = self.jq_select_month = jq_parameter_container.find( 'select[name="month"]' ),
             jq_select_month_option_no_select = self.jq_select_month_option_no_select = $( '<option />' ).val( -1 ).text( OPTIONS.SELECT_MONTH_NO_SELECT_TEXT ).appendTo( jq_select_month ),
@@ -689,8 +695,15 @@ var TemplateOrderHistoryFilter = {
             jq_checkbox_include_nondigital = self.jq_checkbox_include_nondigital = jq_parameter_container.find( 'input[name="include-nondigital"]' ),
             jq_checkbox_include_reservation = self.jq_checkbox_include_reservation = jq_parameter_container.find( 'input[name="include-reservation"]' ),
             
+            jq_select_destination = self.jq_select_destination = jq_parameter_container.find( 'select[name="destination"]' ).prop( 'disabled', 'disabled' ).css( {
+                'opacity' : '0.5'
+            } ),
+            jq_select_destination_option_all = $( '<option />' ).val( '' ).text( OPTIONS.SELECT_DESTINATION_ALL_TEXT ).appendTo( jq_select_destination ),
+            jq_select_destination_option,
+            
             jq_counter_container = self.jq_counter_container = jq_filter_control.find( '.counter-container' ).css( {
-                'color' : 'lightgray'
+                'color' : 'lightgray',
+                'vertical-align' : 'top'
             } ),
             jq_counter_digital = jq_counter_container.find( '.counter.digital' ),
             jq_counter_nondigital = jq_counter_container.find( '.counter.nondigital' ),
@@ -705,7 +718,7 @@ var TemplateOrderHistoryFilter = {
             jq_message = self.jq_message = jq_filter_control.find( '.message' ).css( {
                 'color' : 'red',
                 'font-weight' : 'bolder',
-                'min-width' : '100px'
+                'min-width' : '50px'
             } );
         
         jq_filter_control.find( 'label' ).css( {
@@ -725,7 +738,7 @@ var TemplateOrderHistoryFilter = {
             'margin' : '0 0 0 4px'
         } );
         
-        jq_filter_control.find( 'span.month-label.label' ).css( {
+        jq_filter_control.find( 'span.month-label.label, span.destination-label' ).css( {
             'margin' : '0 4px 0 0'
         } );
         
@@ -740,6 +753,7 @@ var TemplateOrderHistoryFilter = {
         jq_parameter_container.find( '.include-digital-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_DIGITAL_TEXT );
         jq_parameter_container.find( '.include-nondigital-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT );
         jq_parameter_container.find( '.include-reservation-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT );
+        jq_parameter_container.find( '.destination-label' ).text( OPTIONS.SELECT_DESTINATION_LABEL_TEXT );
         
         jq_counter_digital.find( '.label' ).text( OPTIONS.COUNTER_LABEL_DIGITAL_TEXT );
         jq_counter_nondigital.find( '.label' ).text( OPTIONS.COUNTER_LABEL_NONDIGITAL_TEXT );
@@ -779,6 +793,20 @@ var TemplateOrderHistoryFilter = {
             .change( function ( event ) {
                 self.onchange_include_reservation( event );
             } );
+        
+        jq_select_destination.val( '' );
+        
+        if ( IS_EDGE ) {
+            // MS-Edge では、なぜか jQuery の change イベントが発火しない
+            jq_select_destination[ 0 ].addEventListener( 'change', function ( event ) {
+                self.onchange_destination( event );
+            } );
+        }
+        else {
+            jq_select_destination.change( function ( event ) {
+                self.onchange_destination( event );
+            } );
+        }
         
         jq_button_print_receipt
             .click( function ( event ) {
@@ -864,6 +892,21 @@ var TemplateOrderHistoryFilter = {
     }, // end of onchange_include_reservation()
     
     
+    onchange_destination : function ( event ) {
+        var self = this,
+            jq_select_destination = self.jq_select_destination;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        jq_select_destination.blur();
+        
+        self.update_order_container();
+        
+        return self;
+    }, // end of onchange_destination()
+    
+    
     onclick_button_print_receipt : function ( event ) {
         var self = this;
         
@@ -883,7 +926,9 @@ var TemplateOrderHistoryFilter = {
     update_order_container : function () {
         var self = this,
             jq_select_month = self.jq_select_month,
+            jq_select_destination = self.jq_select_destination,
             target_month = self.target_month = parseInt( jq_select_month.val(), 10 ),
+            target_destination = self.target_destination = jq_select_destination.val(),
             order_information = self.order_information;
             
         if ( isNaN( target_month ) || ( target_month < 0 ) || ( 12 < target_month ) ) {
@@ -943,6 +988,12 @@ var TemplateOrderHistoryFilter = {
             }
             if ( ( ! filter_options.include_reservation ) && ( order_info.is_reservation ) ) {
                 return;
+            }
+            
+            if ( target_destination ) {
+                if ( order_info.order_destination != target_destination ) {
+                    return;
+                }
             }
             
             if ( order_info.is_digital ) {
@@ -1040,8 +1091,24 @@ var TemplateOrderHistoryFilter = {
             
             self.analyze_order_information( result.fetch_result_list );
             
+            var destination_infos = order_information.destination_infos,
+                destination_info_list = [];
+            
+            Object.keys( order_information.destination_infos ).forEach( function ( name ) {
+                destination_info_list.push( order_information.destination_infos[ name ] );
+            } );
+            
+            destination_info_list.sort( function ( a, b ) {
+                return ( a.order_info_list.length < b.order_info_list.length );
+            } );
+            
+            destination_info_list.forEach( function ( destination_info ) {
+                $( '<option />' ).val( destination_info.name ).text( destination_info.name ).appendTo( self.jq_select_destination );
+            } );
+            
             order_information.is_ready = true;
             self.jq_select_month_option_no_select.prop( 'disabled', true );
+            self.jq_select_destination.css( 'opacity', '1' ).prop( 'disabled', false );
             self.jq_button_print_receipt.prop( 'disabled', false );
             self.jq_counter_container.css( 'color', 'gray' );
             
@@ -1061,7 +1128,9 @@ var TemplateOrderHistoryFilter = {
             month_number = 0,
             
             order_information = self.order_information,
-            month_order_info_lists = order_information.month_order_info_lists = {};
+            month_order_info_lists = order_information.month_order_info_lists = {},
+            destination_infos = order_information.destination_infos = {},
+            destination_info;
         
         
         for ( month_number = 0; month_number <= 12; month_number ++ ) {
@@ -1078,6 +1147,17 @@ var TemplateOrderHistoryFilter = {
                 
                 month_order_info_lists[ 0 ].push( individual_order_info );
                 month_order_info_lists[ individual_order_info.order_date_info.month ].push( individual_order_info );
+                
+                if ( individual_order_info.order_destination ) {
+                    destination_info = destination_infos[ individual_order_info.order_destination ];
+                    if ( ! destination_info ) {
+                        destination_infos[ individual_order_info.order_destination ] = destination_info = {
+                            name : individual_order_info.order_destination,
+                            order_info_list : []
+                        };
+                    }
+                    destination_info.order_info_list.push( individual_order_info );
+                }
             } );
         } );
         
@@ -1094,6 +1174,7 @@ var TemplateOrderHistoryFilter = {
             order_date_info = {},
             order_price = jq_order_info_left.find( '.a-span2 .value' ).text().trim(),
             order_price_number = ( typeof order_price == 'string' ) ? parseInt( order_price.replace( /[^\d.\-]/g, '' ), 10 ) : 0,
+            order_destination = jq_order_info_left.find( '.recipient .a-size-base .trigger-text' ).text().trim(),
             jq_order_info_actions = jq_order_info.find( '.actions' ),
             order_id = jq_order_info_actions.find( '.a-size-mini .value' ).text().trim(),
             jq_order_info_actions_base = jq_order_info_actions.find( '.a-size-base' ),
@@ -1118,6 +1199,7 @@ var TemplateOrderHistoryFilter = {
             order_date_info : order_date_info,
             order_price : order_price,
             order_price_number : order_price_number,
+            order_destination : order_destination,
             order_id : order_id,
             order_detail_url : order_detail_url,
             order_receipt_url : order_receipt_url,
@@ -1239,6 +1321,7 @@ var TemplateOrderHistoryFilter = {
                 open_parameters : {
                     target_year : self.target_year,
                     target_month : self.target_month,
+                    target_destination : self.target_destination,
                     is_digital : false,
                     first_order_url : nondigital_first_order_url,
                     additional_order_urls : nondigital_order_urls,
@@ -1254,6 +1337,7 @@ var TemplateOrderHistoryFilter = {
                 open_parameters : {
                     target_year : self.target_year,
                     target_month : self.target_month,
+                    target_destination : self.target_destination,
                     is_digital : true,
                     first_order_url : digital_first_order_url,
                     additional_order_urls : digital_order_urls,
@@ -1303,7 +1387,7 @@ var TemplateReceiptOutputPage = {
     jq_header_template : $( '<h2 class="receipt noprint"><a/></h2>' ),
     jq_hr_template : $( '<hr class="receipt"/>' ),
     
-    csv_header_columns : [ "注文日", "注文番号", "商品名", "付帯情報", "価格", "個数", "商品小計", "注文合計", "状態", "請求額", "クレカ請求日", "クレカ請求額", "クレカ種類", "注文概要URL", "領収書URL", "商品URL" ],
+    csv_header_columns : [ "注文日", "注文番号", "商品名", "付帯情報", "価格", "個数", "商品小計", "注文合計", "お届け先", "状態", "請求先", "請求額", "クレカ請求日", "クレカ請求額", "クレカ種類", "注文概要URL", "領収書URL", "商品URL" ],
     
     init : function ( open_parameters ) {
         var self = this,
@@ -1602,8 +1686,10 @@ var TemplateReceiptOutputPage = {
             item_list = [],
             order_subtotal_price = '',
             order_total_price = '',
+            order_destination = '',
             order_status = '',
             order_billing_amount = '',
+            order_billing_destination = '',
             card_info = {
                 card_type : '',
                 card_billing_date : '',
@@ -1654,6 +1740,7 @@ var TemplateReceiptOutputPage = {
             
             card_info.card_type = jq_card_type.text().trim();
             card_info.card_billing_amount = self.get_price_number( self.get_child_text_from_jq_element( jq_card_type.parents( 'tr:first' ).find( '.pmts_view_payment_plan_payment_method_coverage_amount' ) ) );
+            order_billing_destination = self.get_child_text_from_jq_element( jq_payment_summary.find( '.pmts_billing_address_block .pmts-account-holder-name' ) );
         }
         else {
             // 古い領収書の場合、支払い情報欄のフォーマットが異なる(2014/04頃を境に変化)
@@ -1661,25 +1748,57 @@ var TemplateReceiptOutputPage = {
             jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( 'table tr' );
             order_billing_amount =  self.get_price_number( self.get_child_text_from_jq_element( jq_payment_summary.find( 'td[align="right"] > b:contains("総計")' ) ) );
             
-            var b_counter = 0,
-                card_type_text = '';
+            var is_card_type = false,
+                is_billing_destination = false,
+                card_type_text = '',
+                billing_destination_text = '',
+                br_counter = 0;
             
             jq_payment_summary.find( 'td:eq(0)' ).contents().each( function () {
-                if ( ( this.nodeType == 1 ) && ( this.tagName == 'B' ) ) {
-                    b_counter ++;
-                    
-                    if ( 2 <= b_counter ) {
-                        return false;
+                var text_value = '',
+                    nodee_type = this.nodeType;
+                
+                if ( nodee_type == 1 ) {
+                    switch ( this.tagName ) {
+                        case 'B' :
+                            text_value = this.textContent;
+                            
+                            if ( /支払い?方法/.test( text_value ) ) {
+                                is_card_type = true;
+                                is_billing_destination = false;
+                                br_counter = 0;
+                            }
+                            else if ( /請求先/.test( text_value ) ) {
+                                is_card_type = false;
+                                is_billing_destination = true;
+                                br_counter = 0;
+                            }
+                            break;
+                        case 'BR' :
+                            br_counter ++;
+                            break;
                     }
                     return;
                 }
                 
-                if ( ( 0 < b_counter ) && ( this.nodeType == 3 ) ) {
-                    card_type_text += this.nodeValue.trim();
+                if ( nodee_type != 3 ) {
+                    return;
+                }
+                
+                if ( br_counter == 1 ) {
+                    text_value = this.nodeValue.trim();
+                    
+                    if ( is_card_type ) {
+                        card_type_text += text_value;
+                    }
+                    else if ( is_billing_destination ) {
+                        billing_destination_text += text_value;
+                    }
                 }
             } );
             
             card_info.card_type = card_type_text.trim();
+            order_billing_destination = billing_destination_text.trim();
         }
         
         order_status = self.get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:first td[align="center"] font b' ) );
@@ -1693,8 +1812,10 @@ var TemplateReceiptOutputPage = {
             item_list : item_list,
             order_subtotal_price : order_subtotal_price,
             order_total_price : order_total_price,
+            order_destination : order_destination,
             order_status : order_status,
             order_billing_amount : order_billing_amount,
+            order_billing_destination : order_billing_destination,
             card_info : card_info,
             order_url : order_url,
             receipt_url : receipt_url
@@ -1714,6 +1835,7 @@ var TemplateReceiptOutputPage = {
             item_group_list = [],
             order_subtotal_price = '',
             order_total_price = '',
+            order_billing_destination = '',
             order_billing_amount = '',
             order_url = '',
             receipt_url = '',
@@ -1724,7 +1846,9 @@ var TemplateReceiptOutputPage = {
             jq_order_summary_header = jq_order_container.children( 'table:eq(0)' ),
             jq_order_summary_content_list = jq_order_container.children( 'table:gt(0):lt(-1)' ),
             jq_payment_content = jq_order_container.children( 'table:eq(-1)' ).find( 'table > tbody' ),
-            jq_payment_total = jq_payment_content.children( 'tr:eq(1)' ).find( 'table > tbody > tr > td[align="right"]' ),
+            jq_payment_summary = jq_payment_content.children( 'tr:eq(1)' ).find( 'table:first > tbody > tr > td' ),
+            jq_payment_billing_destination = jq_payment_summary.find( '.displayAddressDiv .displayAddressUL' ),
+            jq_payment_total = jq_payment_summary.find( 'table > tbody > tr > td[align="right"]' ),
             jq_payment_card_info_list = jq_payment_content.children( 'tr:eq(2)' ).find( 'table table tr' );
         
         order_date = self.get_formatted_date_string( self.get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
@@ -1754,7 +1878,12 @@ var TemplateReceiptOutputPage = {
             var item_list = [],
                 jq_order_summary_content = $( this ).find( 'table > tbody' ),
                 jq_order_summary_items = jq_order_summary_content.children( 'tr:eq(1)' ).find( 'table:eq(0) td:eq(0) table:eq(1) tr:gt(0)' ),
-                jq_order_summary_total = jq_order_summary_content.children( 'tr:eq(2)' ).find( 'table > tbody > tr > td[align="right"]' ),
+                
+                jq_order_summary_container = jq_order_summary_content.children( 'tr:eq(2)' ).find( 'table > tbody > tr' ),
+                jq_order_summary_destination = jq_order_summary_container.find( '.displayAddressDiv .displayAddressUL' ),
+                jq_order_summary_total = jq_order_summary_container.find( 'td[align="right"]' ),
+                
+                destination = self.get_child_text_from_jq_element( jq_order_summary_destination.find( '.displayAddressFullName' ) ),
                 status = self.get_child_text_from_jq_element( jq_order_summary_content.children( 'tr:eq(0)' ).find( 'b.sans center' ) ),
                 status_date = self.get_formatted_date_string( status ),
                 status_date_ms = ( status_date ) ? new Date( status_date ).getTime() : 0,
@@ -1820,6 +1949,7 @@ var TemplateReceiptOutputPage = {
                 item_list : item_list,
                 subtotal_price : subtotal_price,
                 total_price : total_price,
+                destination : destination,
                 status : status,
                 billing_amount : billing_amount,
                 card_info : card_info
@@ -1828,6 +1958,7 @@ var TemplateReceiptOutputPage = {
         
         order_subtotal_price = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("商品の小計")) > td[align="right"]:eq(-1)' ) ) );
         order_total_price = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("注文合計")) > td[align="right"]:eq(-1)' ) ) );
+        order_billing_destination = self.get_child_text_from_jq_element( jq_payment_billing_destination.find( '.displayAddressFullName' ) );
         order_billing_amount = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"] > b:contains("ご請求額")) > td[align="right"]:eq(-1) b' ) ) );
         
         order_url = get_absolute_url( jq_receipt_body.children( 'center:eq(-1)' ).find( 'p > a' ).attr( 'href' ) );
@@ -1839,6 +1970,7 @@ var TemplateReceiptOutputPage = {
             item_group_list : item_group_list,
             order_subtotal_price : order_subtotal_price,
             order_total_price : order_total_price,
+            order_billing_destination : order_billing_destination,
             order_billing_amount : order_billing_amount,
             order_url : order_url,
             receipt_url : receipt_url
@@ -1945,11 +2077,13 @@ var TemplateReceiptOutputPage = {
                         item.number, // 個数
                         ( item_index == 0 ) ? order_parameters.order_subtotal_price : '', // 商品小計
                         ( item_index == 0 ) ? order_parameters.order_total_price : '', // 注文合計(送料・手数料含む)
+                        order_parameters.order_destination, // お届け先
                         order_parameters.order_status, // 状態
+                        order_parameters.order_billing_destination, // 請求先
                         ( item_index == 0 ) ? order_parameters.order_billing_amount : '', // 請求額
-                        ( item_index == 0 ) ? order_parameters.card_info.card_billing_date : '', // クレカ請求日
+                        order_parameters.card_info.card_billing_date, // クレカ請求日
                         ( item_index == 0 ) ? order_parameters.card_info.card_billing_amount : '', // クレカ請求額
-                        ( item_index == 0 ) ? order_parameters.card_info.card_type : '', // クレカ種類
+                        order_parameters.card_info.card_type, // クレカ種類
                         order_parameters.order_url, // 注文概要URL
                         order_parameters.receipt_url, // 領収書URL
                         item.url // 商品URL
@@ -1972,11 +2106,13 @@ var TemplateReceiptOutputPage = {
                             item.number, // 個数
                             ( item_index == 0 ) ? item_group.subtotal_price : '', // 商品小計
                             ( item_index == 0 ) ? item_group.total_price : '', // 注文合計(送料・手数料含む)
+                            item_group.destination, // お届け先
                             item_group.status, // 状態
+                            order_parameters.order_billing_destination, // 請求先
                             ( item_index == 0 ) ? item_group.billing_amount : '', // 請求額
-                            ( item_index == 0 ) ? item_group.card_info.card_billing_date : '', // クレカ請求日
+                            item_group.card_info.card_billing_date, // クレカ請求日
                             ( item_index == 0 ) ? item_group.card_info.card_billing_amount : '', // クレカ請求額
-                            ( item_index == 0 ) ? item_group.card_info.card_type : '', // クレカ種類
+                            item_group.card_info.card_type, // クレカ種類
                             order_parameters.order_url, // 注文概要URL
                             order_parameters.receipt_url, // 領収書URL
                             item.url // 商品URL
@@ -1990,9 +2126,18 @@ var TemplateReceiptOutputPage = {
             bom = new Uint8Array( [ 0xEF, 0xBB, 0xBF ] ),
             blob = new Blob( [ bom, csv ], { 'type' : 'text/csv' } ),
             blob_url = URL.createObjectURL( blob ),
-            filename = 'amazon-order_' + ( ( open_parameters.is_digital ) ? '' : 'non-' ) + 'digital_' + open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : '' ) + '.csv',
+            filename_parts = [ 'amazon-order' ],
+            filename,
             jq_csv_download_link = self.jq_csv_download_link = $( '<a/>' );
-            
+        
+        filename_parts.push( ( ( open_parameters.is_digital ) ? '' : 'non-' ) + 'digital' );
+        
+        if ( open_parameters.target_destination ) {
+            filename_parts.push( 'to-' + open_parameters.target_destination );
+        }
+        filename_parts.push( open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
+        filename = filename_parts.join( '_' ) + '.csv';
+        
         jq_csv_download_link
             .attr( {
                 'download' : filename,
