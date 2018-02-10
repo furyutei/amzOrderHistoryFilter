@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.7
+// @version         0.1.0.8
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
@@ -110,7 +110,10 @@ OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT = '注文履歴CSV(参考用)ダウンロード
 OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT = '宛名変更';
 OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE = '宛名を指定してください';
 OPTIONS.PRINT_PREVIEW_BUTTON_TEXT = '印刷プレビュー';
-
+OPTIONS.TEXT_FILTER_LABEL_TEXT = '絞り込み';
+OPTIONS.TEXT_FILTER_PLACEHOLDER_TEXT = 'キーワード、または、注文番号を入力';
+OPTIONS.TEXT_FILTER_APPLY_BUTTUON_TEXT = '適用';
+OPTIONS.TEXT_FILTER_CLEAR_BUTTUON_TEXT = 'クリア';
 
 // }
 
@@ -126,7 +129,7 @@ if ( typeof console.log.apply == 'undefined' ) {
     // → apply できるようにパッチをあてる
     // ※参考：[javascript - console.log.apply not working in IE9 - Stack Overflow](https://stackoverflow.com/questions/5538972/console-log-apply-not-working-in-ie9)
     
-    [ 'log','info','warn','error','assert','dir','clear','profile','profileEnd' ].forEach( function ( method ) {
+    [ 'log', 'info', 'warn', 'error', 'assert', 'dir', 'clear', 'profile', 'profileEnd' ].forEach( function ( method ) {
         console[ method ] = this.bind( console[ method ], console );
     }, Function.prototype.call );
     
@@ -177,6 +180,20 @@ var get_value = ( function () {
         return localStorage.getItem( name );
     };
 } )(); // end of get_value()
+
+
+function zen_to_han( source_string ) {
+    return source_string
+        .replace( /[Ａ-Ｚａ-ｚ０-９]/g, function( match_string ) {
+            return String.fromCharCode( match_string.charCodeAt( 0 ) - 0xFEE0 );
+        } )
+        .replace( /[\u3000]/g, ' ' );
+} // end of zen_to_han()
+
+
+function get_safefilename( source_filename ) {
+    return source_filename.replace( /[\\\/:*?"<>|;]/g, '_' );
+} // end of get_safefilename()
 
 
 var object_extender = ( function () {
@@ -603,20 +620,22 @@ var TemplateOrderHistoryFilter = {
     filter_control_template : [
         '<div class="clearfix">',
         '  <div class="parameter-container">',
-        '    <label><span class="month-label label"></span><select name="month"></select></label>',
+        '    <label><span class="month-label label left"></span><select name="month"></select></label>',
         '    <label><input name="include-digital" type="checkbox" /><span class="include-digital-label label"></span></label>',
         '    <label><input name="include-nondigital" type="checkbox" /><span class="include-nondigital-label label"></span></label>',
         '    <label>(<input name="include-reservation" type="checkbox" /><span class="include-reservation-label label"></span>)</label>',
         '    <br />',
-        '    <label><span class="destination-label label"></span><select name="destination"></select></label>',
+        '    <label><span class="destination-label label left"></span><select name="destination"></select></label>',
+        '    <label><span class="text-filter-label label left"></span><form><input name="text-filter-keywords" type="text" /><button name="text-filter-apply" /><button name="text-filter-clear" /></form><label>',
         '  </div>',
-        '  <div class="message"></div>',
         '  <div class="operation-container">',
+        '    <div class="counter-container">',
+        '      <div class="counter digital"><span class="label"></span>:<span class="number">-</span></div>',
+        '      <div class="counter nondigital"><span class="label"></span>:<span class="number">-</span></div>',
+        '    </div>',
         '    <button name="print-receipt"></button>',
-        '  </div>',
-        '  <div class="counter-container">',
-        '    <div class="counter digital"><span class="label"></span>:<span class="number">-</span></div>',
-        '    <div class="counter nondigital"><span class="label"></span>:<span class="number">-</span></div>',
+        '    <br />',
+        '    <div class="message"></div>',
         '  </div>',
         '</div>'
     ].join( '\n' ),
@@ -686,11 +705,16 @@ var TemplateOrderHistoryFilter = {
             filter_options = self.filter_options,
             
             jq_filter_control = self.filter_control = $( self.filter_control_template ).attr( 'id', SCRIPT_NAME + '-filter-control' ).css( {
-                'margin' : '0 0 4px 0'
+                'position' : 'relative',
+                'margin' : '0 0 4px 0',
+                'min-height' : '60px'
             } ),
             
             jq_parameter_container = jq_filter_control.find( '.parameter-container' ).css( {
-                'float' : 'left'
+                'position' : 'absolute',
+                'top' : '0',
+                'left' : '0',
+                'z-index' : 1
             } ),
             jq_select_month = self.jq_select_month = jq_parameter_container.find( 'select[name="month"]' ),
             jq_select_month_option_no_select = self.jq_select_month_option_no_select = $( '<option />' ).val( -1 ).text( OPTIONS.SELECT_MONTH_NO_SELECT_TEXT ).appendTo( jq_select_month ),
@@ -701,11 +725,37 @@ var TemplateOrderHistoryFilter = {
             jq_checkbox_include_nondigital = self.jq_checkbox_include_nondigital = jq_parameter_container.find( 'input[name="include-nondigital"]' ),
             jq_checkbox_include_reservation = self.jq_checkbox_include_reservation = jq_parameter_container.find( 'input[name="include-reservation"]' ),
             
-            jq_select_destination = self.jq_select_destination = jq_parameter_container.find( 'select[name="destination"]' ).prop( 'disabled', 'disabled' ).css( {
-                'opacity' : '0.5'
-            } ),
+            jq_select_destination = self.jq_select_destination = jq_parameter_container.find( 'select[name="destination"]' )
+                .prop( 'disabled', 'disabled' )
+                .css( {
+                    'opacity' : '0.5'
+                } ),
             jq_select_destination_option_all = $( '<option />' ).val( '' ).text( OPTIONS.SELECT_DESTINATION_ALL_TEXT ).appendTo( jq_select_destination ),
             jq_select_destination_option,
+            
+            jq_input_text_filter = self.jq_input_text_filter = jq_parameter_container.find( 'input[name="text-filter-keywords"]' )
+                .attr( 'placeholder', OPTIONS.TEXT_FILTER_PLACEHOLDER_TEXT )
+                .prop( 'disabled', 'disabled' )
+                .css( {
+                    'width' : '400px',
+                    'height' : '24px',
+                    'margin-right' : '8px',
+                    'opacity' : '0.5'
+                } ),
+            jq_button_text_filter_apply = self.jq_button_text_filter_apply = jq_parameter_container.find( 'button[name="text-filter-apply"]' )
+                .text( OPTIONS.TEXT_FILTER_APPLY_BUTTUON_TEXT )
+                .prop( 'disabled', 'disabled' )
+                .css( {
+                    'cursor' : 'pointer',
+                    'margin-right' : '8px'
+                } ),
+            jq_button_text_filter_clear = self.jq_button_text_filter_clear = jq_parameter_container.find( 'button[name="text-filter-clear"]' )
+                .text( OPTIONS.TEXT_FILTER_CLEAR_BUTTUON_TEXT )
+                .prop( 'disabled', 'disabled' )
+                .css( {
+                    'cursor' : 'pointer',
+                    'margin-right' : '8px'
+                } ),
             
             jq_counter_container = self.jq_counter_container = jq_filter_control.find( '.counter-container' ).css( {
                 'color' : 'lightgray',
@@ -717,14 +767,21 @@ var TemplateOrderHistoryFilter = {
             jq_counter_nondigital_number = self.jq_counter_nondigital_number = jq_counter_nondigital.find( '.number' ),
             
             jq_operation_continer = jq_filter_control.find( '.operation-container' ).css( {
-                'float' : 'right'
+                'position' : 'absolute',
+                'top' : '0',
+                'right' : '0',
+                'text-align' : 'right'
             } ),
-            jq_button_print_receipt = self.jq_button_print_receipt = jq_operation_continer.find( 'button[name="print-receipt"]' ).text( OPTIONS.PRINT_RECEIPT_BUTTON_TEXT ).prop( 'disabled', 'disabled' ),
+            jq_button_print_receipt = self.jq_button_print_receipt = jq_operation_continer.find( 'button[name="print-receipt"]' )
+                .text( OPTIONS.PRINT_RECEIPT_BUTTON_TEXT )
+                .prop( 'disabled', 'disabled' ),
             
             jq_message = self.jq_message = jq_filter_control.find( '.message' ).css( {
                 'color' : 'red',
+                'min-width' : '50px',
+                'padding' : '4px',
                 'font-weight' : 'bolder',
-                'min-width' : '50px'
+                'text-align' : 'right'
             } );
         
         jq_filter_control.find( 'label' ).css( {
@@ -732,7 +789,7 @@ var TemplateOrderHistoryFilter = {
             'margin' : '0 4px'
         } );
         
-        jq_filter_control.find( 'div' ).css( {
+        jq_filter_control.find( 'div,form' ).css( {
             'display' : 'inline-block'
         } );
         
@@ -744,7 +801,7 @@ var TemplateOrderHistoryFilter = {
             'margin' : '0 0 0 4px'
         } );
         
-        jq_filter_control.find( 'span.month-label.label, span.destination-label' ).css( {
+        jq_filter_control.find( 'span.label.left' ).css( {
             'margin' : '0 4px 0 0'
         } );
         
@@ -760,6 +817,7 @@ var TemplateOrderHistoryFilter = {
         jq_parameter_container.find( '.include-nondigital-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT );
         jq_parameter_container.find( '.include-reservation-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT );
         jq_parameter_container.find( '.destination-label' ).text( OPTIONS.SELECT_DESTINATION_LABEL_TEXT );
+        jq_parameter_container.find( '.text-filter-label' ).text( OPTIONS.TEXT_FILTER_LABEL_TEXT );
         
         jq_counter_digital.find( '.label' ).text( OPTIONS.COUNTER_LABEL_DIGITAL_TEXT );
         jq_counter_nondigital.find( '.label' ).text( OPTIONS.COUNTER_LABEL_NONDIGITAL_TEXT );
@@ -814,12 +872,25 @@ var TemplateOrderHistoryFilter = {
             } );
         }
         
+        jq_button_text_filter_apply
+            .click( function ( event ) {
+                self.onclick_text_filter_apply_button( event );
+            } )
+            .parent( 'form' )
+            .on( 'submit', function( event ) {
+                self.onclick_text_filter_apply_button( event );
+            } );
+        
+        jq_button_text_filter_clear
+            .click( function ( event ) {
+                self.onclick_text_filter_clear_button( event );
+            } );
+        
         jq_button_print_receipt
             .click( function ( event ) {
                 self.onclick_button_print_receipt( event );
             } );
         
-        //$( '#controlsContainer .top-controls label[for="orderFilter"]' ).after( jq_filter_control );
         $( '#controlsContainer' ).append( jq_filter_control );
         
         return self;
@@ -913,6 +984,31 @@ var TemplateOrderHistoryFilter = {
     }, // end of onchange_destination()
     
     
+    onclick_text_filter_apply_button  : function ( event ) {
+        var self = this;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        self.update_order_container();
+        
+        return self;
+    }, // end of onclick_text_filter_apply_button()
+    
+    
+    onclick_text_filter_clear_button  : function ( event ) {
+        var self = this;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        self.jq_input_text_filter.val( '' );
+        self.update_order_container();
+        
+        return self;
+    }, // end of onclick_text_filter_clear_button()
+    
+    
     onclick_button_print_receipt : function ( event ) {
         var self = this;
         
@@ -935,6 +1031,8 @@ var TemplateOrderHistoryFilter = {
             jq_select_destination = self.jq_select_destination,
             target_month = self.target_month = parseInt( jq_select_month.val(), 10 ),
             target_destination = self.target_destination = jq_select_destination.val(),
+            text_filter_info = self.text_filter_info = self.get_text_filter_info(),
+            target_keyword_string = self.target_keyword_string = text_filter_info.keyword_string,
             order_information = self.order_information;
             
         if ( isNaN( target_month ) || ( target_month < 0 ) || ( 12 < target_month ) ) {
@@ -1000,6 +1098,10 @@ var TemplateOrderHistoryFilter = {
                 if ( order_info.order_destination != target_destination ) {
                     return;
                 }
+            }
+            
+            if ( ! self.check_text_filter_is_hit( order_info.search_index_text, text_filter_info ) ) {
+                return;
             }
             
             if ( order_info.is_digital ) {
@@ -1115,6 +1217,9 @@ var TemplateOrderHistoryFilter = {
             order_information.is_ready = true;
             self.jq_select_month_option_no_select.prop( 'disabled', true );
             self.jq_select_destination.css( 'opacity', '1' ).prop( 'disabled', false );
+            self.jq_input_text_filter.css( 'opacity', '1' ).prop( 'disabled', false );
+            self.jq_button_text_filter_apply.prop( 'disabled', false );
+            self.jq_button_text_filter_clear.prop( 'disabled', false );
             self.jq_button_print_receipt.prop( 'disabled', false );
             self.jq_counter_container.css( 'color', 'gray' );
             
@@ -1174,7 +1279,7 @@ var TemplateOrderHistoryFilter = {
     get_individual_order_info : function ( jq_order ) {
         var self = this,
             individual_order_info = {},
-            jq_order_info = jq_order.find( '.order-info' ),
+            jq_order_info = jq_order.children( '.order-info' ),
             jq_order_info_left = jq_order_info.find( '.a-col-left' ),
             order_date = jq_order_info_left.find( '.a-span3 .value' ).text().trim(),
             order_date_info = {},
@@ -1186,7 +1291,13 @@ var TemplateOrderHistoryFilter = {
             jq_order_info_actions_base = jq_order_info_actions.find( '.a-size-base' ),
             order_detail_url = jq_order_info_actions_base.find( 'a.a-link-normal:first' ).attr( 'href' ),
             order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' ),
-            jq_cancel_button = jq_order.find( 'a[role="button"][href*="/your-account/order-edit.html"][href*="type=e"],a[role="button"][href*="/order/edit.html"][href*="useCase=cancel"]' );
+            jq_cancel_button = jq_order.find( 'a[role="button"][href*="/your-account/order-edit.html"][href*="type=e"],a[role="button"][href*="/order/edit.html"][href*="useCase=cancel"]' ),
+            jq_order_details = jq_order.children( '.a-box:not(.order-info)' ),
+            jq_order_shipment_info_container = jq_order_details.find( '.js-shipment-info-container' ).clone(),
+            jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row:not(:has(.a-button))' ).clone(),
+            order_shipment_info_text = '',
+            order_item_info_text = '',
+            search_index_text = '';
         
         if ( ( typeof order_date == 'string' ) && ( order_date.match( /^[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)[^\d]*$/ ) ) ) {
             order_date_info.year = parseInt( RegExp.$1, 10 );
@@ -1200,6 +1311,14 @@ var TemplateOrderHistoryFilter = {
              order_receipt_url = order_receipt_url.replace( /\/ref=oh_aui_.*?\?/, '/ref=oh_aui_ajax_dpi?' );
         }
         
+        jq_order_shipment_info_container.remove( 'script, noscript, .a-declarative' );
+        order_shipment_info_text = zen_to_han( jq_order_shipment_info_container.text().trim().replace( /\s+/g, ' ' ) );
+        
+        jq_order_item_infos.remove( 'script, noscript' );
+        order_item_info_text = zen_to_han( jq_order_item_infos.text().trim().replace( /\s+/g, ' ' ) );
+        
+        search_index_text = ( order_id + ' ' + order_shipment_info_text + ' ' + order_item_info_text ).toLowerCase();
+        
         individual_order_info = {
             order_date : order_date,
             order_date_info : order_date_info,
@@ -1211,6 +1330,7 @@ var TemplateOrderHistoryFilter = {
             order_receipt_url : order_receipt_url,
             is_digital : ( order_receipt_url ) ? /\/gp\/digital\//.test( order_receipt_url ) : /^D/.test( order_id ),
             is_reservation : ( 0 < jq_cancel_button.length ),
+            search_index_text : search_index_text,
             jq_order : jq_order
         };
         
@@ -1281,6 +1401,71 @@ var TemplateOrderHistoryFilter = {
     }, // end of fetch_all_html()
     
     
+    get_text_filter_info : function () {
+        var self = this,
+            is_type_or = false,
+            keyword_string = zen_to_han( self.jq_input_text_filter.val().replace( /\s+/, ' ' ) ).trim(),
+            filter_keywords = keyword_string.split( /\s+OR\s+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/ ),
+            text_filter_info = {};
+        
+        if ( 1 < filter_keywords.length ) {
+            is_type_or = true;
+        }
+        else {
+            is_type_or = false;
+            filter_keywords = keyword_string.split( /\s+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/ );
+        }
+        
+        filter_keywords  = filter_keywords
+            .map( function ( filter_keyword ) {
+                return filter_keyword.replace( /(?:^"|"$)/g, '' ).trim().toLowerCase();
+            } )
+            .filter( function ( filter_keyword ) {
+                return ( filter_keyword != '' );
+            } );
+        
+        text_filter_info = {
+            keyword_string : keyword_string,
+            is_type_or : is_type_or,
+            filter_keywords : filter_keywords
+        };
+        
+        return text_filter_info;
+    }, // end of get_text_filter_info()
+    
+    
+    check_text_filter_is_hit : function ( search_index_text, text_filter_info ) {
+        var self = this,
+            is_hit = false;
+        
+        if ( text_filter_info.filter_keywords.length <= 0 ) {
+            return true;
+        }
+        
+        if ( text_filter_info.is_type_or ) {
+            $.each( text_filter_info.filter_keywords, function ( index, filter_keyword ) {
+                if ( 0 <= search_index_text.indexOf( filter_keyword ) ) {
+                    is_hit = true;
+                    
+                    return false;
+                }
+            } );
+        }
+        else {
+            is_hit = true;
+            
+            $.each( text_filter_info.filter_keywords, function ( index, filter_keyword ) {
+                if ( search_index_text.indexOf( filter_keyword ) < 0 ) {
+                    is_hit = false;
+                    
+                    return false;
+                }
+            } );
+        }
+        return is_hit;
+    }, // end of check_text_filter_is_hit()
+    
+    
     open_order_receipts_for_print : function () {
         var self = this,
             order_information = self.order_information,
@@ -1328,6 +1513,7 @@ var TemplateOrderHistoryFilter = {
                     target_year : self.target_year,
                     target_month : self.target_month,
                     target_destination : self.target_destination,
+                    target_keyword_string : self.target_keyword_string,
                     is_digital : false,
                     first_order_url : nondigital_first_order_url,
                     additional_order_urls : nondigital_order_urls,
@@ -1344,6 +1530,7 @@ var TemplateOrderHistoryFilter = {
                     target_year : self.target_year,
                     target_month : self.target_month,
                     target_destination : self.target_destination,
+                    target_keyword_string : self.target_keyword_string,
                     is_digital : true,
                     first_order_url : digital_first_order_url,
                     additional_order_urls : digital_order_urls,
@@ -2370,11 +2557,17 @@ var TemplateReceiptOutputPage = {
         
         filename_parts.push( ( ( open_parameters.is_digital ) ? '' : 'non-' ) + 'digital' );
         
+        filename_parts.push( open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
+        
         if ( open_parameters.target_destination ) {
             filename_parts.push( 'to-' + open_parameters.target_destination );
         }
-        filename_parts.push( open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
-        filename = filename_parts.join( '_' ) + '.csv';
+        
+        if ( open_parameters.target_keyword_string ) {
+            filename_parts.push( 'filter-[' + open_parameters.target_keyword_string + ']' );
+        }
+        
+        filename = get_safefilename( filename_parts.join( '_' ) ) + '.csv';
         
         jq_csv_download_link
             .attr( {
