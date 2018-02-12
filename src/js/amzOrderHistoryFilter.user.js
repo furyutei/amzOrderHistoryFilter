@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.9
+// @version         0.1.0.10
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
@@ -107,6 +107,7 @@ OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = '領収書印刷用画面';
 OPTIONS.LOGIN_REQUIRED_MESSAGE = 'サーバー側よりログインが要求されましたので、取得を中止します。';
 OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE = '応答がないままタイムアウトしました。領収書の取得を最初からやり直します。';
 OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT = '注文履歴CSV(参考用)ダウンロード';
+OPTIONS.REFUND_CSV_DOWNLOAD_BUTTON_TEXT = '返金情報CSV(参考用)ダウンロード';
 OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT = '宛名変更';
 OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE = '宛名を指定してください';
 OPTIONS.PRINT_PREVIEW_BUTTON_TEXT = '印刷プレビュー';
@@ -198,16 +199,17 @@ function get_safefilename( source_filename ) {
 
 
 var object_extender = ( function () {
+    // 参考: [newを封印して、JavaScriptでオブジェクト指向する(1): Architect Note](http://blog.tojiru.net/article/199670885.html?seesaa_related=related_article)
     function object_extender( base_object ) {
-        var template = object_extender.template;
+        var template = object_extender.template,
+            mixin_object_list = Array.prototype.slice.call( arguments, 1 ),
+            expanded_object;
         
         template.prototype = base_object;
         
-        var expanded_object = new template(),
-            object_list = to_array( arguments );
+        expanded_object = new template();
         
-        object_list.shift();
-        object_list.forEach( function ( object ) {
+        mixin_object_list.forEach( function ( object ) {
             Object.keys( object ).forEach( function ( name ) {
                 expanded_object[ name ] = object[ name ];
             } );
@@ -243,7 +245,7 @@ function get_absolute_url( path, base_url ) {
     }
     
     try {
-        return new URL( path, base_url );
+        return new URL( path, base_url ).href;
     }
     catch ( error ) {
         return path;
@@ -344,6 +346,47 @@ var get_jq_html_fragment = ( function () {
         return $( range.createContextualFragment( html ) );
     };
 } )(); // end of get_jq_html_fragment()
+
+
+var get_formatted_date_string = ( function () {
+    var reg_date = /(?:^|[^\d]+)(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/;
+    
+    return function ( source_date_string ) {
+        if ( ( ! source_date_string ) || ( ! source_date_string.trim().match( reg_date ) ) ) {
+            return '';
+        }
+        return ( RegExp.$1 + '/' + RegExp.$2 + '/' + RegExp.$3 );
+    };
+} )(); // end of get_formatted_date_string()
+
+
+function get_child_text_from_jq_element( jq_element ) {
+    var child_text_list = [];
+    
+    jq_element.contents().each( function () {
+        if ( this.nodeType == 3 ) {
+            child_text_list.push( this.nodeValue.trim().replace( /\s+/g, ' ' ) );
+        }
+    } );
+    
+    return child_text_list.join( ' ' ).trim();
+} // end of get_child_text_from_jq_element()
+
+
+function get_price_number( price_string ) {
+    if ( ! price_string ) {
+        return '';
+    }
+    
+    var price_number_string = price_string.replace( /[^\d.\-]/g, '' ),
+        price = parseInt( price_number_string, 10 );
+    
+    if ( isNaN( price ) ) {
+        return '';
+    }
+    
+    return price;
+} // end of get_price_number()
 
 
 function wait_for_rendering( callback, options ) {
@@ -1354,7 +1397,7 @@ var TemplateOrderHistoryFilter = {
         jq_order_item_infos.remove( 'script, noscript' );
         order_item_info_text = zen_to_han( jq_order_item_infos.text().trim().replace( /\s+/g, ' ' ) );
         
-        search_index_text = ( order_id + ' ' + order_shipment_info_text + ' ' + order_item_info_text ).toLowerCase();
+        search_index_text = ( order_id + ' ' + order_date + ' ' + order_shipment_info_text + ' ' + order_item_info_text ).toLowerCase();
         
         if ( order_destination ) {
             recipient_map[ order_destination ] = order_destination;
@@ -1560,12 +1603,12 @@ var TemplateOrderHistoryFilter = {
            
             open_child_window( self.get_signin_url( nondigital_first_order_url ), {
                 open_parameters : {
+                    is_digital : false,
                     target_year : self.target_year,
                     target_month : self.target_month,
                     target_destination : self.target_destination,
                     target_keyword_string : self.target_keyword_string,
                     target_keyword_is_ruled_out : self.target_keyword_is_ruled_out,
-                    is_digital : false,
                     first_order_url : nondigital_first_order_url,
                     additional_order_urls : nondigital_order_urls,
                     show_print_dialog : show_print_dialog
@@ -1578,12 +1621,12 @@ var TemplateOrderHistoryFilter = {
            
             open_child_window( self.get_signin_url( digital_first_order_url ), {
                 open_parameters : {
+                    is_digital : true,
                     target_year : self.target_year,
                     target_month : self.target_month,
                     target_destination : self.target_destination,
                     target_keyword_string : self.target_keyword_string,
                     target_keyword_is_ruled_out : self.target_keyword_is_ruled_out,
-                    is_digital : true,
                     first_order_url : digital_first_order_url,
                     additional_order_urls : digital_order_urls,
                     show_print_dialog : show_print_dialog
@@ -1634,28 +1677,33 @@ var TemplateReceiptOutputPage = {
     
     csv_header_columns : [ "注文日", "注文番号", "商品名", "付帯情報", "価格", "個数", "商品小計", "注文合計", "お届け先", "状態", "請求先", "請求額", "クレカ請求日", "クレカ請求額", "クレカ種類", "注文概要URL", "領収書URL", "商品URL" ],
     
+    refund_csv_header_columns : [ "注文日", "注文番号", "返金日", "返金額", "返金先", "クレカ種類", "備考", "注文概要URL", "領収書URL", "返金通知書URL" ],
+    
+    
     init : function ( open_parameters ) {
         var self = this,
+            
+            remaining_request_order_urls = self.remaining_request_order_urls = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ),
+            max_receipt_number = self.max_receipt_number = remaining_request_order_urls.length,
+            
             loading_dialog = self.loading_dialog = object_extender( TemplateLoadingDialog ).init( {
                 counter_required : true,
-                max_number : 1 + open_parameters.additional_order_urls.length
+                max_number : max_receipt_number
             } ).show(),
             
             jq_body = self.jq_body = $( 'body' ),
             
             url_to_page_info = self.url_to_page_info = {},
             
-            addressee = get_value( SCRIPT_NAME + '-addressee' ),
-            
-            remaining_request_order_urls = self.remaining_request_order_urls = open_parameters.additional_order_urls.slice( 0 );
+            addressee = get_value( SCRIPT_NAME + '-addressee' );
         
         if ( OPTIONS.ADDRESSEE_CHANGEABLE ) {
             self.addressee = ( addressee ) ? addressee : '';
         }
-            
+        
         self.open_parameters = open_parameters;
-        self.result_waiting_counter = 1 + open_parameters.additional_order_urls.length;
-        self.current_receipt_number = 1;
+        self.result_waiting_counter = 1 + max_receipt_number;
+        self.current_receipt_number = 0;
         self.request_counter = 0;
         
         self.is_reloading = false;
@@ -1664,6 +1712,7 @@ var TemplateReceiptOutputPage = {
         self.reset_timeout_timer();
         
         self.jq_csv_download_link = null;
+        self.jq_refund_csv_download_link = null;
         
         $( '<style type="text/css"/>' )
             .text( [
@@ -1678,15 +1727,11 @@ var TemplateReceiptOutputPage = {
             ].join( '\n' ) )
             .appendTo( $( 'head' ) );
         
-        self.create_jq_header( self.current_receipt_number, open_parameters.first_order_url ).prependTo( jq_body );
+        self.create_jq_header( 1, open_parameters.first_order_url ).prependTo( jq_body );
         
         $( window ).on( 'message', function ( event ) {
             self.on_receive_message( event );
         } );
-        
-        url_to_page_info[ open_parameters.first_order_url ] = {
-            receipt_number : self.current_receipt_number
-        };
         
         for ( self.request_counter = 0; self.request_counter < self.limit_parallel_request_number; self.request_counter ++ ) {
             var request_order_url = remaining_request_order_urls.shift();
@@ -1729,7 +1774,7 @@ var TemplateReceiptOutputPage = {
             jq_link = jq_header.find( 'a' ).attr( {
                 'href' : receipt_url,
                 'target' : '_blank'
-            } ).text( 'No.' + receipt_number );
+            } ).text( 'No. ' + receipt_number + ' / ' + self.max_receipt_number );
         
         return jq_header;
     }, // end of create_jq_header()
@@ -1788,12 +1833,14 @@ var TemplateReceiptOutputPage = {
                 existing_window : existing_window,
                 open_parameters : {
                     first_order_url : self.open_parameters.first_order_url,
-                    request_order_url : request_order_url
+                    request_order_url : request_order_url,
+                    is_digital : self.open_parameters.is_digital
                 }
             } );
         
         self.url_to_page_info[ request_order_url ] = {
             receipt_number : receipt_number,
+            order_url : request_order_url,
             child_window : child_window
         };
         
@@ -1804,18 +1851,12 @@ var TemplateReceiptOutputPage = {
     on_rendering_complete : function ( html ) {
         var self = this,
             open_parameters = self.open_parameters,
-            jq_body = self.jq_body,
-            page_info = self.url_to_page_info[ open_parameters.first_order_url ];
+            jq_body = self.jq_body;
         
         log_debug( '*** on_rendering_complete: result_waiting_counter=', self.result_waiting_counter );
         
         self.reset_timeout_timer();
         
-        page_info.html = html;
-        page_info.jq_receipt_body = self.create_jq_receipt_body( html, page_info.receipt_number, open_parameters.first_order_url );
-        page_info.order_parameters = self.get_order_parameters( page_info.jq_receipt_body );
-        
-        self.loading_dialog.counter_increment();
         self.result_waiting_counter --;
         
         if ( OPTIONS.REMOVE_REISSUE_STRINGS ) {
@@ -1878,7 +1919,7 @@ var TemplateReceiptOutputPage = {
         
         page_info.html = event.data.html;
         page_info.jq_receipt_body = self.create_jq_receipt_body( event.data.html, page_info.receipt_number, request_order_url );
-        page_info.order_parameters = self.get_order_parameters( page_info.jq_receipt_body );
+        page_info.order_parameters = self.get_order_parameters( page_info.jq_receipt_body, event.data.order_detail_page_info );
         
         self.loading_dialog.counter_increment();
         self.result_waiting_counter --;
@@ -1918,41 +1959,50 @@ var TemplateReceiptOutputPage = {
     }, // end of on_timeout()
     
     
-    onclick_csv_download_button : function ( event ) {
-        var self = this;
-        
-        event.stopPropagation();
-        event.preventDefault();
-        
-        self.download_csv();
-        
-        return self;
-    }, // end of onclick_csv_download_button()
-    
-    
     finish :  function () {
         var self = this,
             open_parameters = self.open_parameters,
+            
             jq_body = self.jq_body,
             jq_toolbox = $( '<div class="toolbox noprint"/>' ).css( {
                 'position' : 'fixed',
                 'top' : '8px',
                 'right' : '8px',
+                'z-index' : '100',
                 'background' : 'rgba( 255, 255, 224, 0.5 )',
                 'padding' : '4px'
             } ).appendTo( jq_body ),
-            url_to_page_info = self.url_to_page_info;
+            
+            url_to_page_info = self.url_to_page_info,
+            refund_info_container_list = self.refund_info_container_list = [];
         
         if ( self.timeout_timer_id ) {
             clearTimeout( self.timeout_timer_id ) ;
             self.timeout_timer_id = null;
         }
         
-        open_parameters.additional_order_urls.forEach( function ( additional_order_url ) {
-            jq_body.append( url_to_page_info[ additional_order_url ].jq_receipt_body.children() );
+        [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ).forEach( function ( order_url, index ) {
+            var page_info = url_to_page_info[ order_url ];
+            
+            try {
+                if ( 0 < page_info.order_parameters.order_detail_page_info.refund_info.refund_list.length ) {
+                    refund_info_container_list.push( {
+                        refund_info : page_info.order_parameters.order_detail_page_info.refund_info,
+                        page_info : page_info,
+                        order_parameters : page_info.order_parameters
+                    } );
+                }
+            }
+            catch ( error ) {
+            }
+            
+            if ( 0 < index ) {
+                jq_body.append( page_info.jq_receipt_body.children() );
+            }
         } );
         
         self.create_csv_download_button( jq_toolbox );
+        self.create_refund_csv_download_button( jq_toolbox );
         self.create_change_addressee_button( jq_toolbox );
         self.create_print_preview_button( jq_toolbox );
         
@@ -1968,7 +2018,7 @@ var TemplateReceiptOutputPage = {
     }, // end of finish()
     
     
-    get_order_parameters : function ( jq_receipt_body ) {
+    get_order_parameters : function ( jq_receipt_body, order_detail_page_info ) {
         var self = this,
             order_parameters = {};
         
@@ -1978,6 +2028,10 @@ var TemplateReceiptOutputPage = {
         else {
             order_parameters = self.get_order_parameters_nondigital( jq_receipt_body );
         }
+        
+        order_parameters.order_detail_page_info = order_detail_page_info;
+        
+        log_debug( 'get_order_parameters()', order_parameters );
         
         return order_parameters;
     }, // end of get_order_parameters()
@@ -2010,8 +2064,8 @@ var TemplateReceiptOutputPage = {
             jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( '#docs-order-summary-payment-breakdown-container' ),
             jq_payment_summary_price_infos = jq_payment_summary.find( '.pmts-summary-preview-single-item-amount' );
         
-        order_date = self.get_formatted_date_string( self.get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
-        order_id = self.get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
+        order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
+        order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
         
         jq_order_summary_content.find( 'table table tr:gt(0)' ).each( function () {
             var jq_item = $( this ),
@@ -2027,21 +2081,21 @@ var TemplateReceiptOutputPage = {
             
             item_list.push( {
                 name : jq_item_name.text().trim(),
-                remarks : self.get_child_text_from_jq_element( jq_item_info ),
-                price : self.get_price_number( self.get_child_text_from_jq_element( jq_item_price ) ),
+                remarks : get_child_text_from_jq_element( jq_item_info ),
+                price : get_price_number( get_child_text_from_jq_element( jq_item_price ) ),
                 number : 1,
                 url : ( 0 < jq_item_link.length ) ? get_absolute_url( jq_item_link.attr( 'href' ) ) : ''
             } );
         } );
         
-        order_subtotal_price = self.get_price_number( self.get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:last td[colspan][align="right"]:contains("商品小計")' ) ) );
-        order_total_price = self.get_price_number( self.get_child_text_from_jq_element( jq_order_summary_header.find( 'b:contains("注文の合計")' ) ) );
+        order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:last td[colspan][align="right"]:contains("商品小計")' ) ) );
+        order_total_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_header.find( 'b:contains("注文の合計")' ) ) );
         
         if ( 0 < jq_payment_summary.length  ) {
             // 新しい(2014/04頃以降の)ものは、<!-- BEGIN ViewPaymentPlanSummary WIDGET --> というマークが入っている
             // ※ Amazonアプリストアなど、一部旧式のままのものもある模様
             
-            order_billing_amount = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_summary.find( '.pmts-summary-preview-single-item-total .a-color-price' ) ) );
+            order_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_summary.find( '.pmts-summary-preview-single-item-total .a-color-price' ) ) );
             
             jq_payment_summary_price_infos.each( function () {
                 var jq_price_info = $( this ),
@@ -2049,7 +2103,7 @@ var TemplateReceiptOutputPage = {
                     jq_price_info_name = jq_price_info_columns.eq( 0 ),
                     jq_price_info_price = jq_price_info_columns.eq( 1 ),
                     name = jq_price_info_name.text().trim().replace( /(?:の金額)?[：:]+\s*$/g, '' ),
-                    price = self.get_price_number( jq_price_info_price.text() );
+                    price = get_price_number( jq_price_info_price.text() );
                 
                 if ( price === '' ) {
                     return;
@@ -2068,8 +2122,8 @@ var TemplateReceiptOutputPage = {
             var jq_card_type = jq_payment_summary.find( 'table.pmts_payment_method_table .pmts_view_payment_plan_payment_method .pmts-aui-account-number-display:last .pmts-inst-tail' );
             
             card_info.card_type = jq_card_type.text().trim();
-            card_info.card_billing_amount = self.get_price_number( self.get_child_text_from_jq_element( jq_card_type.parents( 'tr:first' ).find( '.pmts_view_payment_plan_payment_method_coverage_amount' ) ) );
-            order_billing_destination = self.get_child_text_from_jq_element( jq_payment_summary.find( '.pmts_billing_address_block .pmts-account-holder-name' ) );
+            card_info.card_billing_amount = get_price_number( get_child_text_from_jq_element( jq_card_type.parents( 'tr:first' ).find( '.pmts_view_payment_plan_payment_method_coverage_amount' ) ) );
+            order_billing_destination = get_child_text_from_jq_element( jq_payment_summary.find( '.pmts_billing_address_block .pmts-account-holder-name' ) );
         }
         else {
             // 古い領収書の場合、支払い情報欄のフォーマットが異なる(2014/04頃を境に変化)
@@ -2142,7 +2196,7 @@ var TemplateReceiptOutputPage = {
                             text_value = this.textContent;
                             
                             if ( /総計/.test( text_value ) ) {
-                                order_billing_amount =  self.get_price_number( text_value );
+                                order_billing_amount =  get_price_number( text_value );
                                 return false;
                             }
                             break;
@@ -2159,7 +2213,7 @@ var TemplateReceiptOutputPage = {
                             }
                             
                             name = parts[ 0 ].trim();
-                            price = self.get_price_number( parts[ 1 ] );
+                            price = get_price_number( parts[ 1 ] );
                             
                             if ( ! price ) {
                                 return;
@@ -2188,7 +2242,7 @@ var TemplateReceiptOutputPage = {
             }
         }
         
-        order_status = self.get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:first td[align="center"] font b' ) );
+        order_status = get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:first td[align="center"] font b' ) );
         
         order_url = get_absolute_url( jq_receipt_body.children( 'center:eq(-1)' ).find( 'p > a' ).attr( 'href' ) );
         receipt_url = get_absolute_url( jq_receipt_body.children( 'h2.receipt' ).find( 'a' ).attr( 'href' ) );
@@ -2208,8 +2262,6 @@ var TemplateReceiptOutputPage = {
             order_url : order_url,
             receipt_url : receipt_url
         };
-        
-        log_debug( 'order_parameters', order_parameters );
         
         return order_parameters;
     }, // end of get_order_parameters_digital()
@@ -2241,13 +2293,13 @@ var TemplateReceiptOutputPage = {
             jq_payment_total = jq_payment_summary.find( 'table > tbody > tr > td[align="right"]' ),
             jq_payment_card_info_list = jq_payment_content.children( 'tr:eq(2)' ).find( 'table table tr' );
         
-        order_date = self.get_formatted_date_string( self.get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
-        order_id = self.get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
+        order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
+        order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
         
-        order_subtotal_price = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("商品の小計")) > td[align="right"]:eq(-1)' ) ) );
-        order_total_price = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("注文合計")) > td[align="right"]:eq(-1)' ) ) );
-        order_billing_destination = self.get_child_text_from_jq_element( jq_payment_billing_destination.find( '.displayAddressFullName' ) );
-        order_billing_amount = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"] > b:contains("ご請求額")) > td[align="right"]:eq(-1) b' ) ) );
+        order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("商品の小計")) > td[align="right"]:eq(-1)' ) ) );
+        order_total_price = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("注文合計")) > td[align="right"]:eq(-1)' ) ) );
+        order_billing_destination = get_child_text_from_jq_element( jq_payment_billing_destination.find( '.displayAddressFullName' ) );
+        order_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"] > b:contains("ご請求額")) > td[align="right"]:eq(-1) b' ) ) );
         
         jq_payment_summary.contents().each( function () {
             var text_value = '',
@@ -2292,16 +2344,16 @@ var TemplateReceiptOutputPage = {
         
         jq_payment_card_info_list.each( function () {
             var jq_payment_card_info = $( this ),
-                card_info_parts = self.get_child_text_from_jq_element( jq_payment_card_info.find( 'td:eq(0)') ).split( ':' ),
+                card_info_parts = get_child_text_from_jq_element( jq_payment_card_info.find( 'td:eq(0)') ).split( ':' ),
                 card_type = '',
                 card_billing_date = '',
                 card_billing_amount = '';
             
             if ( card_info_parts.length == 3 ) {
                 card_type = card_info_parts[ 0 ].trim();
-                card_billing_date = self.get_formatted_date_string( card_info_parts[ 1 ] );
+                card_billing_date = get_formatted_date_string( card_info_parts[ 1 ] );
             }
-            card_billing_amount = self.get_price_number( self.get_child_text_from_jq_element( jq_payment_card_info.find( 'td:eq(1)') ) );
+            card_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_card_info.find( 'td:eq(1)') ) );
             
             card_info_list.push( {
                 card_type : card_type,
@@ -2321,9 +2373,9 @@ var TemplateReceiptOutputPage = {
                 jq_order_summary_total = jq_order_summary_container.find( 'td[align="right"]' ),
                 jq_order_summary_price_infos = jq_order_summary_total.find( 'table:first > tbody > tr' ),
                 
-                destination = self.get_child_text_from_jq_element( jq_order_summary_destination.find( '.displayAddressFullName' ) ),
-                status = self.get_child_text_from_jq_element( jq_order_summary_content.children( 'tr:eq(0)' ).find( 'b.sans center' ) ),
-                status_date = self.get_formatted_date_string( status ),
+                destination = get_child_text_from_jq_element( jq_order_summary_destination.find( '.displayAddressFullName' ) ),
+                status = get_child_text_from_jq_element( jq_order_summary_content.children( 'tr:eq(0)' ).find( 'b.sans center' ) ),
+                status_date = get_formatted_date_string( status ),
                 status_date_ms = ( status_date ) ? new Date( status_date ).getTime() : 0,
                 
                 is_gift_token = /^Amazonギフト券$/.test( status ),
@@ -2364,8 +2416,8 @@ var TemplateReceiptOutputPage = {
                         jq_send_to = jq_item_info.children( 'b:contains("ギフト券を")' ),
                         send_to_parts = jq_send_to.text().split( /[:：]/ ),
                         destination = ( 1 < send_to_parts.length ) ? send_to_parts[ 1 ].trim() : '',
-                        item_status = self.get_child_text_from_jq_element( jq_item_info.find( 'b.h1' ).remove() ),
-                        price = self.get_price_number( self.get_child_text_from_jq_element( jq_item_price ) ),
+                        item_status = get_child_text_from_jq_element( jq_item_info.find( 'b.h1' ).remove() ),
+                        price = get_price_number( get_child_text_from_jq_element( jq_item_price ) ),
                         remarks = jq_item_info.text().replace( /\s+/g, ' ' ).trim(),
                         url = jq_item_info.find( 'a[name="address"]' ).attr( 'href' );
                     
@@ -2394,7 +2446,7 @@ var TemplateReceiptOutputPage = {
                         return;
                     }
                     
-                    orig_remarks = ( self.get_child_text_from_jq_element( jq_item_info ) + ' ' + self.get_child_text_from_jq_element( jq_item_info.find( '.tiny' ) ).replace( /\(\s*\)/, '' ) ).trim();
+                    orig_remarks = ( get_child_text_from_jq_element( jq_item_info ) + ' ' + get_child_text_from_jq_element( jq_item_info.find( '.tiny' ) ).replace( /\(\s*\)/, '' ) ).trim();
                     remarks = orig_remarks.replace( /^(\d+)\s*点\s*,?\s*/, '' );
                     
                     if ( remarks != orig_remarks ) {
@@ -2402,9 +2454,9 @@ var TemplateReceiptOutputPage = {
                     }
                     
                     item_list.push( {
-                        name : self.get_child_text_from_jq_element( jq_item_info.find( 'i' ) ),
+                        name : get_child_text_from_jq_element( jq_item_info.find( 'i' ) ),
                         remarks : remarks,
-                        price : self.get_price_number( self.get_child_text_from_jq_element( jq_item_price ) ),
+                        price : get_price_number( get_child_text_from_jq_element( jq_item_price ) ),
                         number : number,
                         status : status,
                         url : ''
@@ -2417,7 +2469,7 @@ var TemplateReceiptOutputPage = {
                         jq_price_info_name = jq_price_info_columns.eq( 0 ),
                         jq_price_info_price = jq_price_info_columns.eq( 1 ),
                         name = jq_price_info_name.text().trim().replace( /(?:の金額)?[：:]+\s*$/g, '' ),
-                        price = self.get_price_number( jq_price_info_price.text() );
+                        price = get_price_number( jq_price_info_price.text() );
                     
                     if ( price === '' ) {
                         return;
@@ -2495,50 +2547,13 @@ var TemplateReceiptOutputPage = {
             order_billing_destination : order_billing_destination,
             order_billing_amount : order_billing_amount,
             order_url : order_url,
-            receipt_url : receipt_url
+            receipt_url : receipt_url,
+            card_info_list : card_info_list,
+            payment_method_list : payment_method_list
         };
-        
-        log_debug( 'order_parameters', order_parameters );
         
         return order_parameters;
     }, // end of get_order_parameters_nondigital()
-    
-    
-    get_formatted_date_string : function ( source_date_string ) {
-        if ( ( ! source_date_string ) || ( ! source_date_string.trim().match(/(?:^|[^\n]+)(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/ ) ) ) {
-            return '';
-        }
-        return ( RegExp.$1 + '/' + RegExp.$2 + '/' + RegExp.$3 );
-    }, // end of get_formatted_date_string()
-    
-    
-    get_child_text_from_jq_element : function ( jq_element ) {
-        var child_text_list = [];
-        
-        jq_element.contents().each( function () {
-            if ( this.nodeType == 3 ) {
-                child_text_list.push( this.nodeValue.trim().replace( /\s+/g, ' ' ) );
-            }
-        } );
-        
-        return child_text_list.join( ' ' ).trim();
-    }, // end of get_child_text_from_jq_element()
-    
-    
-    get_price_number : function ( price_string ) {
-        if ( ! price_string ) {
-            return '';
-        }
-        
-        var price_number_string = price_string.replace( /[^\d.\-]/g, '' ),
-            price = parseInt( price_number_string, 10 );
-        
-        if ( isNaN( price ) ) {
-            return '';
-        }
-        
-        return price;
-    }, // end of get_price_number()
     
     
     create_csv_download_button : function ( jq_parent ) {
@@ -2561,6 +2576,144 @@ var TemplateReceiptOutputPage = {
     }, // end of create_csv_download_button()
     
     
+    create_refund_csv_download_button : function ( jq_parent ) {
+        var self = this;
+        
+        if ( self.refund_info_container_list.length <= 0 ) {
+            return self;
+        }
+        
+        var jq_refund_csv_download_button = self.jq_refund_csv_download_button = $( '<button class="noprint"/>' );
+        
+        jq_refund_csv_download_button
+            .attr( 'id', SCRIPT_NAME + '-refund-csv-download-button' )
+            .text( OPTIONS.REFUND_CSV_DOWNLOAD_BUTTON_TEXT )
+            .css( {
+                'margin' : '4px',
+                'cursor' : 'pointer'
+            } )
+            .click( function ( event ) {
+                self.onclick_refund_csv_download_button( event );
+            } )
+            .prependTo( jq_parent );
+        
+        return self;
+    }, // end of create_refund_csv_download_button()
+    
+    
+    create_change_addressee_button : function ( jq_parent ) {
+        var self = this;
+        
+        if ( ! OPTIONS.ADDRESSEE_CHANGEABLE ) {
+            return self;
+        }
+        
+        var jq_change_addressee_button = self.jq_change_addressee_button = $( '<button class="noprint"/>' );
+        
+        jq_change_addressee_button
+            .attr( 'id', SCRIPT_NAME + '-change-addressee-button' )
+            .text( OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT )
+            .css( {
+                'margin' : '4px',
+                'cursor' : 'pointer'
+            } )
+            .click( function ( event ) {
+                self.onclick_change_addressee_button( event );
+            } )
+            .prependTo( jq_parent );
+        
+        return self;
+    }, // end of create_change_addressee_button()
+    
+    
+    create_print_preview_button : function ( jq_parent ) {
+        var self = this;
+        
+        if ( ( ! OPTIONS.ENABLE_PRINT_PREVIEW_BUTTON ) || ( ! IS_FIREFOX ) || ( ! IS_WEB_EXTENSION ) ) {
+            return self;
+        }
+        
+        var jq_print_preview_button = self.jq_print_preview_button = $( '<button class="noprint"/>' );
+        
+        jq_print_preview_button
+            .attr( 'id', SCRIPT_NAME + '-print-preview-button' )
+            .text( OPTIONS.PRINT_PREVIEW_BUTTON_TEXT )
+            .css( {
+                'margin' : '4px',
+                'cursor' : 'pointer'
+            } )
+            .click( function ( event ) {
+                self.onclick_print_preview_button( event );
+            } )
+            .prependTo( jq_parent );
+        
+        return self;
+    }, // end of create_print_preview_button()
+    
+    
+    onclick_csv_download_button : function ( event ) {
+        var self = this;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        self.download_csv();
+        
+        return self;
+    }, // end of onclick_csv_download_button()
+    
+    
+    onclick_refund_csv_download_button : function ( event ) {
+        var self = this;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        self.download_refund_csv();
+        
+        return self;
+    }, // end of onclick_refund_csv_download_button()
+    
+    
+    onclick_change_addressee_button : function ( event ) {
+        var self = this,
+            new_addressee;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        new_addressee = prompt( OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE, self.addressee );
+        
+        if ( ( new_addressee === null ) || ( new_addressee === self.addressee ) ) {
+            return self;
+        }
+        
+        self.addressee = new_addressee;
+        set_value( SCRIPT_NAME + '-addressee', self.addressee );
+        
+        self.jq_body.find( '.addressee' ).text( new_addressee );
+        
+        return self;
+    }, // end of onclick_change_addressee_button()
+    
+    
+    onclick_print_preview_button : function ( event ) {
+        var self = this,
+            new_addressee;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        browser.runtime.sendMessage( {
+            type : 'PRINT_PREVIEW_REQUEST'
+        }, function ( response ) {
+            log_debug( response );
+        } );
+        
+        return self;
+    }, // end of onclick_print_preview_button()
+    
+    
     download_csv : function () {
         var self = this;
         
@@ -2574,12 +2727,26 @@ var TemplateReceiptOutputPage = {
     }, // end of download_csv()
     
     
+    download_refund_csv : function () {
+        var self = this;
+        
+        if ( ! self.jq_refund_csv_download_link ) {
+            self.create_refund_csv();
+        }
+        
+        self.jq_refund_csv_download_link[ 0 ].click();
+        
+        return self;
+    }, // end of download_refund_csv()
+    
+    
     create_csv : function () {
         var self = this,
             open_parameters = self.open_parameters,
             url_to_page_info = self.url_to_page_info,
             csv_lines = [],
-            order_url_list = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls );
+            order_url_list = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ),
+            filename = self.get_csv_filename( 'amazon-order' );
         
         csv_lines.push( self.create_csv_line( self.csv_header_columns ) );
         
@@ -2719,48 +2886,56 @@ var TemplateReceiptOutputPage = {
             } );
         }
         
-        var csv = csv_lines.join( '\r\n' ),
-            bom = new Uint8Array( [ 0xEF, 0xBB, 0xBF ] ),
-            blob = new Blob( [ bom, csv ], { 'type' : 'text/csv' } ),
-            blob_url = URL.createObjectURL( blob ),
-            filename_parts = [ 'amazon-order' ],
-            filename,
-            jq_csv_download_link = self.jq_csv_download_link = $( '<a/>' );
-        
-        filename_parts.push( ( ( open_parameters.is_digital ) ? '' : 'non-' ) + 'digital' );
-        
-        filename_parts.push( open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
-        
-        if ( open_parameters.target_destination ) {
-            filename_parts.push( 'to-' + open_parameters.target_destination );
-        }
-        
-        if ( open_parameters.target_keyword_string ) {
-            filename_parts.push( 'filter' + ( ( open_parameters.target_keyword_is_ruled_out ) ? '-not' : '' ) + '(' + open_parameters.target_keyword_string + ')' );
-        }
-        
-        filename = get_safefilename( filename_parts.join( '_' ) ) + '.csv';
-        
-        jq_csv_download_link
-            .attr( {
-                'download' : filename,
-                'href' : blob_url
-            } )
-            .addClass( 'noprint' )
-            .css( {
-                'display' : 'inline-block',
-                'width' : '0',
-                'height' : '0',
-                'visibility' : 'hidden',
-                'position' : 'absolute',
-                'top' : '0',
-                'left' : '0',
-                'pointerEvents' : 'none'
-            } )
+        self.jq_csv_download_link = self.creat_csv_download_link( csv_lines, filename )
             .prependTo( self.jq_body );
         
         return self;
     }, // end of create_csv()
+    
+    
+    create_refund_csv : function () {
+        var self = this,
+            open_parameters = self.open_parameters,
+            csv_lines = [],
+            filename = self.get_csv_filename( 'amazon-refund' );
+        
+        csv_lines.push( self.create_csv_line( self.refund_csv_header_columns ) );
+        
+        self.refund_info_container_list.forEach( function ( refund_info_container ) {
+            var order_parameters = refund_info_container.order_parameters,
+                refund_info = refund_info_container.refund_info,
+                card_type = '';
+            
+            if ( open_parameters.is_digital ) {
+                card_type = order_parameters.card_info.card_type;
+            }
+            else {
+                if ( 0 < order_parameters.payment_method_list.length ) {
+                    card_type = order_parameters.payment_method_list[ 0 ];
+                }
+            }
+            
+            refund_info.refund_list.forEach( function ( refund ) {
+                csv_lines.push( self.create_csv_line( [
+                    order_parameters.order_date, // 注文日
+                    order_parameters.order_id, // 注文番号
+                    refund.date, // 返金日
+                    refund.price, // 返金額
+                    order_parameters.order_billing_destination, // 返金先
+                    card_type, // クレカ種類
+                    refund.remarks, // 備考
+                    order_parameters.order_url, // 注文概要URL
+                    order_parameters.receipt_url, // 領収書URL
+                    refund_info.refund_invoice_url // 返金通知書URL
+                ] ) );
+            } );
+        } );
+        
+        self.jq_refund_csv_download_link = self.creat_csv_download_link( csv_lines, filename )
+            .prependTo( self.jq_body );
+        
+        return self;
+    }, // end of create_refund_csv()
     
     
     create_csv_line : function ( source_csv_columns ) {
@@ -2781,94 +2956,58 @@ var TemplateReceiptOutputPage = {
     }, // end of create_csv_line()
     
     
-    create_change_addressee_button : function ( jq_parent ) {
-        var self = this;
-        
-        if ( ! OPTIONS.ADDRESSEE_CHANGEABLE ) {
-            return self;
-        }
-        
-        var jq_change_addressee_button = self.jq_change_addressee_button = $( '<button class="noprint"/>' );
-        
-        jq_change_addressee_button
-            .attr( 'id', SCRIPT_NAME + '-change-addressee-button' )
-            .text( OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT )
-            .css( {
-                'margin' : '4px',
-                'cursor' : 'pointer'
-            } )
-            .click( function ( event ) {
-                self.onclick_change_addressee_button( event );
-            } )
-            .prependTo( jq_parent );
-        
-        return self;
-    }, // end of create_change_addressee_button()
-    
-    
-    onclick_change_addressee_button : function ( event ) {
+    get_csv_filename : function ( prefix ) {
         var self = this,
-            new_addressee;
+            open_parameters = self.open_parameters,
+            filename_parts = [ prefix ],
+            keyword_string = open_parameters.target_keyword_string;
         
-        event.stopPropagation();
-        event.preventDefault();
+        filename_parts.push( ( ( open_parameters.is_digital ) ? '' : 'non-' ) + 'digital' );
         
-        new_addressee = prompt( OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE, self.addressee );
+        filename_parts.push( open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
         
-        if ( ( new_addressee === null ) || ( new_addressee === self.addressee ) ) {
-            return self;
+        if ( open_parameters.target_destination ) {
+            filename_parts.push( 'to-' + open_parameters.target_destination );
         }
         
-        self.addressee = new_addressee;
-        set_value( SCRIPT_NAME + '-addressee', self.addressee );
-        
-        self.jq_body.find( '.addressee' ).text( new_addressee );
-        
-        return self;
-    }, // end of onclick_change_addressee_button()
-    
-    
-    create_print_preview_button : function ( jq_parent ) {
-        var self = this;
-        
-        if ( ( ! OPTIONS.ENABLE_PRINT_PREVIEW_BUTTON ) || ( ! IS_FIREFOX ) || ( ! IS_WEB_EXTENSION ) ) {
-            return self;
+        if ( keyword_string ) {
+            if ( 50 < keyword_string.length ) {
+                keyword_string = keyword_string.substr( 0, 49 ) + '…';
+            }
+            filename_parts.push( 'filter' + ( ( open_parameters.target_keyword_is_ruled_out ) ? '-not' : '' ) + '(' + keyword_string + ')' );
         }
         
-        var jq_print_preview_button = self.jq_print_preview_button = $( '<button class="noprint"/>' );
+        return get_safefilename( filename_parts.join( '_' ) ) + '.csv';
+    }, // end of get_csv_filename()
+    
+    
+    creat_csv_download_link : function ( csv_lines, filename ) {
+        var csv = csv_lines.join( '\r\n' ),
+            bom = new Uint8Array( [ 0xEF, 0xBB, 0xBF ] ),
+            blob = new Blob( [ bom, csv ], { 'type' : 'text/csv' } ),
+            blob_url = URL.createObjectURL( blob ),
+            jq_csv_download_link = $( '<a/>' );
         
-        jq_print_preview_button
-            .attr( 'id', SCRIPT_NAME + '-print-preview-button' )
-            .text( OPTIONS.PRINT_PREVIEW_BUTTON_TEXT )
+        jq_csv_download_link
+            .attr( {
+                'download' : filename,
+                'href' : blob_url
+            } )
+            .addClass( 'noprint' )
             .css( {
-                'margin' : '4px',
-                'cursor' : 'pointer'
-            } )
-            .click( function ( event ) {
-                self.onclick_print_preview_button( event );
-            } )
-            .prependTo( jq_parent );
+                'display' : 'inline-block',
+                'width' : '0',
+                'height' : '0',
+                'visibility' : 'hidden',
+                'position' : 'absolute',
+                'top' : '0',
+                'left' : '0',
+                'pointerEvents' : 'none'
+            } );
         
-        return self;
-    }, // end of create_print_preview_button()
+        return jq_csv_download_link;
+    } // end of create_csv_download_link()
     
-    
-    onclick_print_preview_button : function ( event ) {
-        var self = this,
-            new_addressee;
-        
-        event.stopPropagation();
-        event.preventDefault();
-        
-        browser.runtime.sendMessage( {
-            type : 'PRINT_PREVIEW_REQUEST'
-        }, function ( response ) {
-            log_debug( response );
-        } );
-        
-        return self;
-    } // end of onclick_print_preview_button()
-
 }; // end of TemplateReceiptOutputPage
 
 // }
@@ -2910,7 +3049,7 @@ function init_first_order_page( open_parameters ) {
 } // end of init_first_order_page()
 
 
-function init_additional_order_page( open_parameters ) {
+function init_order_page_in_iframe( open_parameters ) {
     if ( is_signin_page() ) {
         window.parent.postMessage( {
             request_order_url : open_parameters.request_order_url,
@@ -2932,13 +3071,114 @@ function init_additional_order_page( open_parameters ) {
         return;
     }
     
-    wait_for_rendering( function ( result ) {
-        window.parent.postMessage( {
-            request_order_url : open_parameters.request_order_url,
-            html : result.html
-        }, get_origin_url() ); // ※第二引数は targetOrigin（window.parentの生成元）→同一ドメインのため、簡略化
-    } );
-} // end of init_additional_order_page()
+    var order_detail_url = get_absolute_url( $( 'body > center:eq(-1) p > a' ).attr( 'href' ) ),
+        order_detail_page_info = null,
+        rendering_result = null,
+        
+        on_rendering_complete = function ( result ) {
+            rendering_result = result;
+            
+            finish();
+        },
+        
+        get_refund_info_digital = function ( jq_html_fragment ) {
+            var refund_list = [],
+                refund_info = {
+                    refund_invoice_url : '',
+                    refund_list : refund_list
+                },
+                refund_invoice_url = jq_html_fragment.find( 'a.a-link-normal[href*="/invoice/download"]:contains("返金通知書")' ).attr( 'href' );
+            
+            if ( refund_invoice_url ) {
+                refund_info.refund_invoice_url = get_absolute_url( refund_invoice_url );
+            }
+            
+            jq_html_fragment.find( '#digitalOrderSummaryContainer > .orderSummary:has(.section-header:contains("払い戻し")) > table.sample > tbody > tr' ).each( function () {
+                var jq_refund = $( this );
+                
+                refund_list.push( {
+                    date : get_formatted_date_string( jq_refund.find( 'td > strong' ).text() ),
+                    price : get_price_number( jq_refund.find( 'td[align="right"]' ).text() ),
+                    remarks : ''
+                } );
+            } );
+            
+            return refund_info;
+        }, // end of get_refund_info_digital()
+        
+        get_refund_info_nondigital = function ( jq_html_fragment ) {
+            var refund_list = [],
+                refund_info = {
+                    refund_invoice_url : '',
+                    refund_list : refund_list
+                };
+            
+            jq_html_fragment.find( '#orderDetails .a-spacing-base .a-row.a-expander-container:has(.a-expander-prompt:contains("取引履歴")) .a-expander-content .a-color-success:has(.a-text-bold:contains("返金"))' ).each( function () {
+                var jq_refund = $( this ),
+                    refund_text = jq_refund.find( '.a-text-bold:contains("返金")' ).text().trim();
+                
+                refund_list.push( {
+                    date : get_formatted_date_string( refund_text ),
+                    price : get_price_number( refund_text.replace( /^[^￥]+/, '' ) ),
+                    remarks : ( refund_text.match( /^\s*([^:]+:\s*[^\s]+)/ ) ) ? RegExp.$1 : ''
+                } );
+            } );
+            
+            return refund_info;
+        }, // end of get_refund_info_nondigital()
+        
+        finish = function () {
+            if ( ( ! order_detail_page_info ) || ( ! rendering_result ) ) {
+                return;
+            }
+            
+            var rendering_result_html = rendering_result.html;
+            
+            delete rendering_result.html;
+            
+            window.parent.postMessage( {
+                request_order_url : open_parameters.request_order_url,
+                html : rendering_result_html,
+                order_detail_page_info : order_detail_page_info,
+                rendering_result : rendering_result
+            }, get_origin_url() ); // ※第二引数は targetOrigin（window.parentの生成元）→同一ドメインのため、簡略化
+        }; // end of finish()
+    
+    wait_for_rendering( on_rendering_complete );
+    
+    $.ajax( {
+        url : order_detail_url,
+        type : 'GET',
+        dataType : 'html',
+        headers : { 'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8" },
+        crossDomain : true // リクエストヘッダに X-Requested-With : XMLHttpRequest を含まないようにしないと、Amazon から HTML ではない形式で返されてしまう
+    } )
+        .done( function ( html ) {
+            var jq_html_fragment = get_jq_html_fragment( html ),
+                refund_info = ( open_parameters.is_digital ) ? get_refund_info_digital( jq_html_fragment ) : get_refund_info_nondigital( jq_html_fragment );
+            
+            order_detail_page_info = {
+                url : order_detail_url,
+                success : true,
+                //html : html,
+                refund_info : refund_info
+            };
+            
+            finish();
+        } )
+        .fail( function ( jqXHR, textStatus, errorThrown ) {
+            log_error( order_detail_url, textStatus );
+            
+            order_detail_page_info = {
+                url : order_detail_url,
+                success : false,
+                error_message : 'Fetch Failure'
+            };
+            
+            finish();
+        } );
+    
+} // end of init_order_page_in_iframe()
 
 
 function initialize( user_options ) {
@@ -2984,7 +3224,7 @@ function initialize( user_options ) {
             init_first_order_page( open_parameters );
         }
         else {
-            init_additional_order_page( open_parameters );
+            init_order_page_in_iframe( open_parameters );
         }
     }
     else {
