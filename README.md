@@ -29,7 +29,7 @@ Firefox Quantum で、
 ### ユーザースクリプト版（Greasemonkey / Tampermonkey）
 Firefox＋[Tampermonkey](https://addons.mozilla.org/ja/firefox/addon/tampermonkey/)、Google Chrome＋[Tampermonkey](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=ja) の環境で、  
 
-> [ アマゾン注文履歴フィルタ (amzOrderHistoryFilter.user.js)](https://github.com/furyutei/amzOrderHistoryFilter/raw/master/src/js/amzOrderHistoryFilter.user.js)  
+> [ アマゾン注文履歴フィルタ (amzOrderHistoryFilter.user.js)](https://furyu.atnifty.com/userjs/furyutei/amzOrderHistoryFilter.user.js)  
                                 
 をクリックし、指示に従ってインストール。  
 
