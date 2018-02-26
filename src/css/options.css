@@ -1,0 +1,253 @@
+@charset "utf-8";
+
+.clearfix:after {
+    content: " ";
+    display: block;
+    clear: both;
+}
+
+.hidden {
+    display: none;
+}
+
+body {
+    margin: 0;
+    min-width: 600px;
+    color: #111111;
+    background: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Noto Sans Japanese", "ヒラギノ角ゴ ProN W3", Meiryo, sans-serif;
+    vertical-align: middle;
+}
+
+a {
+    text-decoration: none;
+}
+
+p {
+    margin: 0;
+    padding: 0;
+}
+
+h1 {
+    min-height: 20px;
+    margin: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #ffffff;
+    background: #232f3e;
+}
+
+h1 a {
+    color: #ffffff;
+}
+
+h1 a .version {
+    color: #ff9900;
+}
+
+h1 a span + span {
+    margin-left: 12px;
+}
+
+h2 {
+    margin: 0 8px;
+    padding: 8px 0 4px;
+    font-size: 14px;
+    font-weight: bolder;
+    color: #111111;
+    border-bottom: solid 2px #cccccc;
+}
+
+h3 {
+    font-size: 14px;
+}
+
+div.main {
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    line-height: 120%;
+    background: #232f3e;
+}
+
+div.main > form {
+    background: #ffffff;
+}
+
+div.main > form + form {
+    margin-top: 4px;
+}
+
+form#command {
+}
+
+form#opts {
+}
+
+form#donation {
+}
+
+form#donation .header {
+    margin: 0 16px;
+    padding: 4px 8px;
+}
+
+form#donation .donation-method-list {
+    list-style: decimal;
+    margin: 0 24px;
+    padding: 0 16px;
+}
+
+form#donation .donation-method-list > li {
+    margin-bottom: 16px;
+}
+
+form#donation .donation-method-list > li > h3 > a {
+    color: #0066c0;
+}
+
+form#donation .donation-method-list > li > ul {
+    list-style-type: check;
+    margin: 0;
+    padding: 0 16px;
+}
+
+form#donation .donation-method-list > li > ul > li {
+    min-height: 28px;
+}
+
+form#donation .donation-method-list > li > ul > li > input {
+    margin-left: 12px;
+}
+
+form#donation .donation-method-list > li > ul > li > input[name="mail-address"] {
+    width: 140px;
+    padding: 2px 8px;
+}
+
+
+label.slide-switch {
+    display: inline-block;
+    margin: 8px 16px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+label.slide-switch > div {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+}
+
+label.slide-switch > div + div {
+    margin-left: 8px;
+}
+
+label.slide-switch input[type="checkbox"] {
+    display: none;
+}
+
+label.slide-switch .label {
+    position: relative;
+    height: 24px;
+}
+
+label.slide-switch .label .text {
+    display: inline-block;
+    font-weight: bolder;
+}
+
+label.slide-switch.ready .label .text {
+    transition: opacity 0.3s;
+}
+
+label.slide-switch .label .text.off {
+    opacity: 1;
+    color: #888888;
+}
+
+label.slide-switch .label .text.on {
+    position: absolute;
+    opacity: 0;
+    color: black;
+}
+
+label.slide-switch .switch {
+    position: relative;
+    width: 48px;
+    height: 24px;
+    border-radius: 12px;
+    background: #cccccc;
+}
+
+label.slide-switch.ready .switch {
+    transition: background 0.3s;
+}
+
+label.slide-switch .switch:before,
+label.slide-switch .switch:after {
+    display: block;
+    position: absolute;
+    content: "";
+}
+
+label.slide-switch .switch:before {
+    top: 2px;
+    right: 2px;
+    bottom: 2px;
+    left: 2px;
+    border-radius: 10px;
+    background: white;
+}
+
+label.slide-switch .switch:after {
+    top: 4px;
+    left: 4px;
+    bottom: 4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    background: #cccccc;
+}
+
+label.slide-switch.ready .switch:after {
+    transition: left 0.3s, background 0.3s;
+}
+
+label.slide-switch input[type="checkbox"]:checked ~ .label {
+    color: black;
+}
+
+label.slide-switch input[type="checkbox"]:checked ~ .label .text.off {
+    opacity: 0;
+}
+
+label.slide-switch input[type="checkbox"]:checked ~ .label .text.on {
+    opacity: 1;
+}
+
+label.slide-switch input[type="checkbox"]:checked ~ .switch {
+    background: #8ce196;
+    background: #7eaf24;
+}
+
+label.slide-switch input[type="checkbox"]:checked ~ .switch:after {
+    left: calc(100% - 20px);
+    background: #8ce196;
+    background: #7eaf24;
+}
+
+footer {
+    min-height: 20px;
+    margin: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #ffffff;
+    background: #232f3e;
+}
+
+footer a {
+    color: #ffffff;
+}
+
+/* end of file*/

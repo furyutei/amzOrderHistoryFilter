@@ -2,8 +2,9 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.10
+// @version         0.1.0.11
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
+// @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
 // @include         https://www.amazon.co.jp/ap/signin*
@@ -74,12 +75,6 @@ var OPTIONS = {
 var SCRIPT_NAME = 'amzOrderHistoryFilter',
     DEBUG = false;
 
-if ( window[ SCRIPT_NAME + '_touched' ] ) {
-    return;
-}
-window[ SCRIPT_NAME + '_touched' ] = true;
-
-
 if ( typeof jQuery != 'function' ) {
     console.error( SCRIPT_NAME + ':', 'Library not found - ', 'jQuery:', typeof jQuery );
     return;
@@ -89,12 +84,30 @@ var $ = jQuery,
     IS_WEB_EXTENSION = !! ( window.is_web_extension ),
     IS_FIREFOX = ( 0 <= navigator.userAgent.toLowerCase().indexOf( 'firefox' ) ),
     IS_EDGE = ( 0 <= navigator.userAgent.toLowerCase().indexOf( 'edge' ) ),
-    WEB_EXTENSION_INIT = window[ SCRIPT_NAME + '_web_extension_init' ];
+    WEB_EXTENSION_INIT = window.web_extension_init,
+    ORDER_HISTORY_FILTER = null,
+    DEFAULT_OPTIONS = {},
+    IS_TOUCHED = ( function () {
+        var touched_id = SCRIPT_NAME + '_touched',
+            jq_touched = $( '#' + touched_id );
+        
+        if ( 0 < jq_touched.length ) {
+            return true;
+        }
+        
+        $( '<b>' ).attr( 'id', touched_id ).css( 'display', 'none' ).appendTo( $( document.documentElement ) );
+        
+        return false;
+    } )();
 
+if ( IS_TOUCHED ) {
+    console.error( SCRIPT_NAME + ': Already loaded.' );
+    return;
+}
 
 OPTIONS.SELECT_MONTH_LABEL_TEXT = '対象月選択';
 OPTIONS.SELECT_MONTH_NO_SELECT_TEXT = '未選択';
-OPTIONS.SELECT_MONTH_ALL_TEXT = '通年';
+OPTIONS.SELECT_MONTH_ALL_TEXT = '全て';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_DIGITAL_TEXT = 'デジタル';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT = 'デジタル以外';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT = '予約分を含む';
@@ -697,12 +710,30 @@ var TemplateOrderHistoryFilter = {
     },
     
     
-    init : function () {
+    init : function ( under_suspension ) {
         var self = this;
         
+        self.under_suspension = !! under_suspension;
+        
+        var target_period = $( 'select#orderFilter' ).val();
+        
         try {
-            if ( ! $( 'select#orderFilter' ).val().match( /^year-(\d{4})$/ ) ) {
-                return self;
+            if ( target_period.match( /^year-(\d{4})$/ ) ) {
+                target_period = RegExp.$1;
+            }
+            else {
+                switch ( target_period ) {
+                    case 'last30' :
+                        target_period = 'last-30days';
+                        break;
+                    
+                    case 'months-6' :
+                        target_period = 'last-6months';
+                        break;
+                    
+                    default :
+                        return self;
+                }
             }
         }
         catch ( error ) {
@@ -710,8 +741,9 @@ var TemplateOrderHistoryFilter = {
             return self;
         }
         
-        var target_year = self.target_year = RegExp.$1,
-            target_month = self.target_month = -1,
+        self.target_period = target_period;
+        
+        var target_month = self.target_month = -1,
             order_information = self.order_information = {
                 is_ready : false,
                 month_order_info_lists : {},
@@ -724,6 +756,53 @@ var TemplateOrderHistoryFilter = {
         
         return self;
     }, // end of init()
+    
+    
+    is_under_suspension : function () {
+        var self = this;
+        
+        return self.under_suspension;
+    }, // end of is_under_suspension()
+    
+    
+    activate : function () {
+        var self = this;
+        
+        if ( ! self.under_suspension ) {
+            return self;
+        }
+        
+        self.under_suspension = false;
+        
+        if ( self.jq_filter_control ) {
+            self.jq_filter_control.show();
+        }
+        
+        return self;
+    }, // end of activate()
+    
+    
+    suspend : function () {
+        var self = this;
+        
+        if ( self.under_suspension ) {
+            return self;
+        }
+        
+        if ( self.order_information.is_ready ) {
+            // 動作停止要求があったときに既に準備完了（ページ内容改変）済み→リロードを行う
+            window.location.reload( false );
+            return self;
+        }
+        
+        self.under_suspension = true;
+        
+        if ( self.jq_filter_control ) {
+            self.jq_filter_control.hide();
+        }
+        
+        return self;
+    }, // end of suspend()
     
     
     init_filter_options : function () {
@@ -753,7 +832,7 @@ var TemplateOrderHistoryFilter = {
             month_number = 0,
             filter_options = self.filter_options,
             
-            jq_filter_control = self.filter_control = $( self.filter_control_template ).attr( 'id', SCRIPT_NAME + '-filter-control' ).css( {
+            jq_filter_control = self.jq_filter_control = $( self.filter_control_template ).attr( 'id', SCRIPT_NAME + '-filter-control' ).css( {
                 'position' : 'relative',
                 'margin' : '0 0 4px 0',
                 'min-height' : '80px'
@@ -765,9 +844,16 @@ var TemplateOrderHistoryFilter = {
                 'left' : '0',
                 'z-index' : 1
             } ),
-            jq_select_month = self.jq_select_month = jq_parameter_container.find( 'select[name="month"]' ),
-            jq_select_month_option_no_select = self.jq_select_month_option_no_select = $( '<option />' ).val( -1 ).text( OPTIONS.SELECT_MONTH_NO_SELECT_TEXT ).appendTo( jq_select_month ),
-            jq_select_month_option_all = $( '<option />' ).val( 0 ).text( OPTIONS.SELECT_MONTH_ALL_TEXT ).appendTo( jq_select_month ),
+            
+            jq_select_month = self.jq_select_month = jq_parameter_container.find( 'select[name="month"]' ).css( {
+                'background' : '#fff0f5'
+            } ),
+            jq_select_month_option_no_select = self.jq_select_month_option_no_select = $( '<option />' ).val( -1 ).text( OPTIONS.SELECT_MONTH_NO_SELECT_TEXT ).appendTo( jq_select_month ).css( {
+                'background' : '#fff0f5'
+            } ),
+            jq_select_month_option_all = self.jq_select_month_option_all = $( '<option />' ).val( 0 ).text( OPTIONS.SELECT_MONTH_ALL_TEXT ).appendTo( jq_select_month ).css( {
+                'background' : 'white'
+            } ),
             jq_select_month_option,
             
             jq_checkbox_include_digital = self.jq_checkbox_include_digital = jq_parameter_container.find( 'input[name="include-digital"]' ),
@@ -832,7 +918,14 @@ var TemplateOrderHistoryFilter = {
                 'padding' : '4px',
                 'font-weight' : 'bolder',
                 'text-align' : 'right'
-            } );
+            } ),
+            
+            current_date = new Date(),
+            target_period = self.target_period,
+            current_year_number = current_date.getFullYear(),
+            current_month_number = ( ( target_period == current_year_number ) || isNaN( target_period ) ) ? ( 1 + current_date.getMonth() ) : 0,
+            jq_select_month_option_this_year = $();
+            
         
         jq_filter_control.find( 'label' ).css( {
             'display' : 'inline-block',
@@ -874,7 +967,26 @@ var TemplateOrderHistoryFilter = {
         jq_counter_nondigital.find( '.label' ).text( OPTIONS.COUNTER_LABEL_NONDIGITAL_TEXT );
         
         for ( month_number = 12; 1 <= month_number ; month_number -- ) {
-            jq_select_month_option = $( '<option />' ).val( month_number ).text( month_number ).appendTo( jq_select_month );
+            jq_select_month_option = $( '<option />' ).val( month_number ).text( month_number ).css( 'background', 'white' ).appendTo( jq_select_month );
+            
+            if ( ! current_month_number ) {
+                continue;
+            }
+            
+            if ( target_period == current_year_number ) {
+                if ( current_month_number < month_number ) {
+                    jq_select_month_option.prop( 'disabled', true ).css( 'background', '#cccccc' );
+                }
+            }
+            else {
+                if ( month_number <= current_month_number ) {
+                    jq_select_month_option_this_year = jq_select_month_option_this_year.add( jq_select_month_option );
+                }
+            }
+        }
+        
+        if ( 0 < jq_select_month_option_this_year.length ) {
+            jq_select_month_option_all.after( jq_select_month_option_this_year );
         }
         
         jq_select_month.val( -1 );
@@ -950,6 +1062,10 @@ var TemplateOrderHistoryFilter = {
             .click( function ( event ) {
                 self.onclick_button_print_receipt( event );
             } );
+        
+        if ( self.under_suspension ) {
+            jq_filter_control.hide();
+        }
         
         $( '#controlsContainer' ).append( jq_filter_control );
         
@@ -1277,7 +1393,11 @@ var TemplateOrderHistoryFilter = {
             self.analyze_order_information( result.fetch_result_list );
             
             var destination_infos = order_information.destination_infos,
-                destination_info_list = [];
+                destination_info_list = [],
+                month_number = 0,
+                month_order_info_lists = order_information.month_order_info_lists,
+                jq_select_month = self.jq_select_month,
+                jq_select_month_option;
             
             Object.keys( order_information.destination_infos ).forEach( function ( name ) {
                 destination_info_list.push( order_information.destination_infos[ name ] );
@@ -1291,8 +1411,25 @@ var TemplateOrderHistoryFilter = {
                 $( '<option />' ).val( destination_info.name ).text( destination_info.name ).appendTo( self.jq_select_destination );
             } );
             
+            for ( month_number = 1; month_number <= 12; month_number ++ ) {
+                jq_select_month_option = jq_select_month.children( 'option[value=' + month_number + ']' );
+                
+                if ( month_order_info_lists[ month_number ].length <= 0 ) {
+                    //jq_select_month_option.remove();
+                    if ( jq_select_month_option.is( ':selected' ) ) {
+                        jq_select_month.val( 0 );
+                    }
+                    jq_select_month_option.prop( 'disabled', true ).css( 'background', '#cccccc' );
+                }
+                else {
+                    jq_select_month_option.css( 'background', 'white' );
+                }
+            }
+            
             order_information.is_ready = true;
-            self.jq_select_month_option_no_select.prop( 'disabled', true );
+            
+            self.jq_select_month.css( 'background', 'transparent' );
+            self.jq_select_month_option_no_select.prop( 'disabled', true ).css( 'background', '#cccccc' );
             self.jq_select_destination.css( 'opacity', '1' ).prop( 'disabled', false );
             self.jq_input_text_filter.css( 'opacity', '1' ).prop( 'disabled', false );
             self.jq_checkbox_text_filter_keywords_ruled_out.prop( 'disabled', false ).parent( 'label' ).css( 'opacity', '1' );
@@ -1369,7 +1506,11 @@ var TemplateOrderHistoryFilter = {
             jq_order_info_actions_base = jq_order_info_actions.find( '.a-size-base' ),
             order_detail_url = jq_order_info_actions_base.find( 'a.a-link-normal:first' ).attr( 'href' ),
             order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' ),
-            jq_cancel_button = jq_order.find( 'a[role="button"][href*="/your-account/order-edit.html"][href*="type=e"],a[role="button"][href*="/order/edit.html"][href*="useCase=cancel"]' ),
+            jq_cancel_button = jq_order.find( 'a[role="button"]' ).filter( [
+                '[href*="/your-account/order-edit.html"][href*="type=e"]',
+                '[href*="/order/edit.html"][href*="useCase=cancel"]',
+                '[href*="/ss/help/contact/"][href*="cancelRequest=1"]'
+            ].join( ',' ) ),
             jq_order_details = jq_order.children( '.a-box:not(.order-info)' ),
             jq_order_shipment_info_container = jq_order_details.find( '.js-shipment-info-container' ).clone(),
             jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row:not(:has(.a-button))' ).clone(),
@@ -1421,7 +1562,7 @@ var TemplateOrderHistoryFilter = {
             order_detail_url : order_detail_url,
             order_receipt_url : order_receipt_url,
             is_digital : ( order_receipt_url ) ? /\/gp\/digital\//.test( order_receipt_url ) : /^D/.test( order_id ),
-            is_reservation : ( 0 < jq_cancel_button.length ),
+            is_reservation : ( ( 0 < jq_cancel_button.length ) && ( jq_order_details.length <= jq_cancel_button.length ) ),
             search_index_text : search_index_text,
             recipient_map : recipient_map,
             jq_order : jq_order
@@ -1604,7 +1745,7 @@ var TemplateOrderHistoryFilter = {
             open_child_window( self.get_signin_url( nondigital_first_order_url ), {
                 open_parameters : {
                     is_digital : false,
-                    target_year : self.target_year,
+                    target_period : self.target_period,
                     target_month : self.target_month,
                     target_destination : self.target_destination,
                     target_keyword_string : self.target_keyword_string,
@@ -1622,7 +1763,7 @@ var TemplateOrderHistoryFilter = {
             open_child_window( self.get_signin_url( digital_first_order_url ), {
                 open_parameters : {
                     is_digital : true,
-                    target_year : self.target_year,
+                    target_period : self.target_period,
                     target_month : self.target_month,
                     target_destination : self.target_destination,
                     target_keyword_string : self.target_keyword_string,
@@ -2964,7 +3105,7 @@ var TemplateReceiptOutputPage = {
         
         filename_parts.push( ( ( open_parameters.is_digital ) ? '' : 'non-' ) + 'digital' );
         
-        filename_parts.push( open_parameters.target_year + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
+        filename_parts.push( open_parameters.target_period + ( ( 0 < open_parameters.target_month ) ? '-' + open_parameters.target_month : ''  ) );
         
         if ( open_parameters.target_destination ) {
             filename_parts.push( 'to-' + open_parameters.target_destination );
@@ -3015,7 +3156,7 @@ var TemplateReceiptOutputPage = {
 
 // ■ ページ初期化処理 {
 function is_order_history_page() {
-    return /^https?:\/\/[^\/]+\/gp\/your-account\/order-history/.test( window.location.href );
+    return /^https?:\/\/[^\/]+\/gp\/(?:your-account|css)\/order-history/.test( window.location.href );
 } // end of is_order_history_page()
 
 
@@ -3030,16 +3171,24 @@ function is_signin_page() {
 
 
 function init_order_history_page() {
+    if ( ! OPTIONS.OPERATION ) {
+        return;
+    }
+    
     if ( ! is_order_history_page() ) {
         return;
     }
     
-    object_extender( TemplateOrderHistoryFilter ).init();
+    ORDER_HISTORY_FILTER = object_extender( TemplateOrderHistoryFilter ).init( ! OPTIONS.OPERATION );
     
 } // end of init_order_history_page()
 
 
 function init_first_order_page( open_parameters ) {
+    if ( ! OPTIONS.OPERATION ) {
+        return;
+    }
+    
     if ( ! is_receipt_page() ) {
         return;
     }
@@ -3050,6 +3199,10 @@ function init_first_order_page( open_parameters ) {
 
 
 function init_order_page_in_iframe( open_parameters ) {
+    if ( ! OPTIONS.OPERATION ) {
+        return;
+    }
+    
     if ( is_signin_page() ) {
         window.parent.postMessage( {
             request_order_url : open_parameters.request_order_url,
@@ -3181,7 +3334,39 @@ function init_order_page_in_iframe( open_parameters ) {
 } // end of init_order_page_in_iframe()
 
 
+function on_update_options( updated_options ) {
+    if ( updated_options ) {
+        Object.keys( updated_options ).forEach( function ( name ) {
+            if ( updated_options[ name ] === null ) {
+                OPTIONS[ name ] = DEFAULT_OPTIONS[ name ];
+                return;
+            }
+            OPTIONS[ name ] = updated_options[ name ];
+        } );
+    }
+    
+    if ( ! ORDER_HISTORY_FILTER ) {
+        init_order_history_page();
+        return;
+    }
+
+    if ( updated_options.hasOwnProperty( 'OPERATION' ) ) {
+        if ( OPTIONS.OPERATION ) {
+            ORDER_HISTORY_FILTER.activate();
+        }
+        else {
+            ORDER_HISTORY_FILTER.suspend();
+        }
+    }
+    
+} // end of on_update_options()
+
+
 function initialize( user_options ) {
+    Object.keys( OPTIONS ).forEach( function ( name ) {
+        DEFAULT_OPTIONS[ name ] = OPTIONS[ name ];
+    } );
+    
     if ( user_options ) {
         Object.keys( user_options ).forEach( function ( name ) {
             if ( user_options[ name ] === null ) {
@@ -3189,10 +3374,6 @@ function initialize( user_options ) {
             }
             OPTIONS[ name ] = user_options[ name ];
         } );
-    }
-    
-    if ( ! OPTIONS.OPERATION ) {
-        return;
     }
     
     var open_parameters = ( function () {
@@ -3241,6 +3422,8 @@ if ( typeof WEB_EXTENSION_INIT == 'function' ) {
     // 拡張機能から実行した場合、ユーザーオプションを読み込む
     WEB_EXTENSION_INIT( function ( user_options ) {
         initialize( user_options );
+    }, function ( updated_options ) {
+        on_update_options( updated_options );
     } );
 }
 else {

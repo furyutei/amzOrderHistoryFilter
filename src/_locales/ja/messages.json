@@ -1,14 +1,76 @@
 {
     "ext_title" : {
+        "message" : "アマゾン注文履歴フィルタ",
+        "description" : "The title of the extension."
+    },
+    
+    "ext_short_name" : {
+        "message" : "AOHF",
+        "description" : "The short version of the extension's name."
+    },
+    
+    "ext_description" : {
+        "message" : "アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。",
+        "description" : "The description of the extension."
+    },
+    
+    "OPTIONS" : {
         "message" : "アマゾン注文履歴フィルタ"
-    ,   "description" : "The title of the extension."
-    }
-,   "ext_short_name" : {
-        "message" : "AOHF"
-    ,   "description" : "The short version of the extension's name."
-    }
-,   "ext_description" : {
-        "message" : "アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。"
-    ,   "description" : "The description of the extension."
+    },
+    
+    "SET" : {
+        "message" : "設定"
+    },
+    
+    "DEFAULT" : {
+        "message" : "デフォルトに戻す"
+    },
+    
+    "ENABLED" : {
+        "message" : "有効"
+    },
+    
+    "DISABLED" : {
+        "message" : "無効"
+    },
+    
+    "IN_ACTION" : {
+        "message" : "動作中"
+    },
+    
+    "UNDER_SUSPENSION" : {
+        "message" : "停止中"
+    },
+    
+    "DONATION" : {
+        "message" : "「気に入った！」「役に立った！」と思ったら……"
+    },
+    
+    "DONATION_HEADER" : {
+        "message" : "そのお気持ちを贈り物にしていただけると、感激です！"
+    },
+    
+    "AMAZON_GIFTCARD" : {
+        "message" : "Amazonギフト券(Eメールタイプ)"
+    },
+    
+    "AMAZON_WISHLIST" : {
+        "message" : "ほしい物リスト"
+    },
+    
+    "GIFTCARD_EMAIL_ADDRESS_HEADER" : {
+        "message" : "受取人メールアドレス"
+    },
+    
+    "GIFTCARD_MESSAGE_HEADER" : {
+        "message" : "メッセージでは、ご感想などを一言いただけるとうれしいです。"
+    },
+    
+    "HANDLE_NAME" : {
+        "message" : "風柳"
+    },
+    
+    "TWITTER_ACCOUNT" : {
+        "message" : "furyutei"
     }
 }
