@@ -2,13 +2,13 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.11
+// @version         0.1.0.12
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
 // @include         https://www.amazon.co.jp/ap/signin*
-// @require         https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js
+// @require         https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @description     アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。
@@ -378,7 +378,7 @@ function get_child_text_from_jq_element( jq_element ) {
     
     jq_element.contents().each( function () {
         if ( this.nodeType == 3 ) {
-            child_text_list.push( this.nodeValue.trim().replace( /\s+/g, ' ' ) );
+            child_text_list.push( this.nodeValue.replace( /[\s\u00a0\ufffd]+/g, ' ' ).trim() );
         }
     } );
     
@@ -2164,10 +2164,10 @@ var TemplateReceiptOutputPage = {
             order_parameters = {};
         
         if ( self.open_parameters.is_digital ) {
-            order_parameters = self.get_order_parameters_digital( jq_receipt_body );
+            order_parameters = self.get_order_parameters_digital( jq_receipt_body, order_detail_page_info.item_info_list );
         }
         else {
-            order_parameters = self.get_order_parameters_nondigital( jq_receipt_body );
+            order_parameters = self.get_order_parameters_nondigital( jq_receipt_body, order_detail_page_info.item_info_list );
         }
         
         order_parameters.order_detail_page_info = order_detail_page_info;
@@ -2178,7 +2178,7 @@ var TemplateReceiptOutputPage = {
     }, // end of get_order_parameters()
     
     
-    get_order_parameters_digital : function ( jq_receipt_body ) {
+    get_order_parameters_digital : function ( jq_receipt_body, item_info_list ) {
         var self = this,
             order_parameters = {},
             order_date = '',
@@ -2408,7 +2408,7 @@ var TemplateReceiptOutputPage = {
     }, // end of get_order_parameters_digital()
     
     
-    get_order_parameters_nondigital : function ( jq_receipt_body ) {
+    get_order_parameters_nondigital : function ( jq_receipt_body, item_info_list ) {
         var self = this,
             order_parameters = {},
             order_date = '',
@@ -2435,6 +2435,9 @@ var TemplateReceiptOutputPage = {
             jq_payment_card_info_list = jq_payment_content.children( 'tr:eq(2)' ).find( 'table table tr' );
         
         order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
+        if ( ! order_date ) {
+            order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("定期おトク便")):first' ) ) );
+        }
         order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
         
         order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("商品の小計")) > td[align="right"]:eq(-1)' ) ) );
@@ -2581,7 +2584,9 @@ var TemplateReceiptOutputPage = {
                         jq_item_price = jq_item.find( 'td:eq(1)' ),
                         remarks = '',
                         orig_remarks = '',
-                        number = 1;
+                        number = 1,
+                        item_name = '',
+                        item_url = '';
                     
                     if ( ( jq_item_info.length <= 0 ) || ( jq_item_price.length <= 0 ) ) {
                         return;
@@ -2594,14 +2599,30 @@ var TemplateReceiptOutputPage = {
                         number = parseInt( RegExp.$1, 10 );
                     }
                     
+                    item_name = get_child_text_from_jq_element( jq_item_info.find( 'i' ) );
+                    item_url = '';
+                    
+                    $( item_info_list ).each( function () {
+                        var item_info = this;
+                        
+                        if ( ( 0 <= item_info.item_name.indexOf( item_name ) || 0 <= item_name.indexOf( item_info.item_name ) ) ) {
+                            item_url = item_info.item_url;
+                            return false;
+                        }
+                    } );
+                    
                     item_list.push( {
-                        name : get_child_text_from_jq_element( jq_item_info.find( 'i' ) ),
+                        name : item_name,
                         remarks : remarks,
                         price : get_price_number( get_child_text_from_jq_element( jq_item_price ) ),
                         number : number,
                         status : status,
-                        url : ''
+                        url : item_url
                     } );
+                    
+                    if ( ! item_url ) {
+                        log_error( '(*) item_url not found: item=', item_list[ item_list.length - 1 ], 'item_info_list=', item_info_list );
+                    }
                 } );
                 
                 jq_order_summary_price_infos.each( function () {
@@ -3280,6 +3301,36 @@ function init_order_page_in_iframe( open_parameters ) {
             return refund_info;
         }, // end of get_refund_info_nondigital()
         
+        get_item_info_list_digital = function ( jq_html_fragment ) {
+            var item_info_list = [];
+            
+            jq_html_fragment.find( '.orderSummary a[href*="/dp/"]' ).each( function () {
+                var jq_item_link = $( this );
+                
+                item_info_list.push( {
+                    item_url : get_absolute_url( jq_item_link.attr( 'href' ) ),
+                    item_name : jq_item_link.text().replace( /[\s\u00a0\ufffd]+/g, ' ' ).trim()
+                } );
+            } );
+            
+            return item_info_list;
+        }, // end of get_item_info_digital()
+        
+        get_item_info_list_nondigital = function ( jq_html_fragment ) {
+            var item_info_list = [];
+            
+            jq_html_fragment.find( '.shipment:not(:has(.a-text-bold:contains("返品"))) a.a-link-normal[href*="/gp/product/"]:not(:has(img))' ).each( function () {
+                var jq_item_link = $( this );
+                
+                item_info_list.push( {
+                    item_url : get_absolute_url( jq_item_link.attr( 'href' ) ),
+                    item_name : jq_item_link.text().replace( /[\s\u00a0\ufffd]+/g, ' ' ).trim()
+                } );
+            } );
+            
+            return item_info_list;
+        }, // end of get_item_info_nondigital()
+        
         finish = function () {
             if ( ( ! order_detail_page_info ) || ( ! rendering_result ) ) {
                 return;
@@ -3308,13 +3359,15 @@ function init_order_page_in_iframe( open_parameters ) {
     } )
         .done( function ( html ) {
             var jq_html_fragment = get_jq_html_fragment( html ),
-                refund_info = ( open_parameters.is_digital ) ? get_refund_info_digital( jq_html_fragment ) : get_refund_info_nondigital( jq_html_fragment );
+                refund_info = ( open_parameters.is_digital ) ? get_refund_info_digital( jq_html_fragment ) : get_refund_info_nondigital( jq_html_fragment ),
+                item_info_list = ( open_parameters.is_digital ) ? get_item_info_list_digital( jq_html_fragment ) : get_item_info_list_nondigital( jq_html_fragment );
             
             order_detail_page_info = {
                 url : order_detail_url,
                 success : true,
                 //html : html,
-                refund_info : refund_info
+                refund_info : refund_info,
+                item_info_list : item_info_list
             };
             
             finish();
