@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.13
+// @version         0.1.0.14
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -1475,7 +1475,21 @@ var TemplateOrderHistoryFilter = {
             
             jq_orders.each( function () {
                 var jq_order = $( this ),
+                    individual_order_info;
+                
+                try {
                     individual_order_info = self.get_individual_order_info( jq_order );
+                }
+                catch ( error ) {
+                    log_error( '*** [BUG] ***' );
+                    log_info( 'jq_order.html()\n', jq_order.html() );
+                    return;
+                }
+                
+                if ( individual_order_info.order_date_info.month < 0 ) {
+                    log_info( '[malformed order info]\n', individual_order_info );
+                    return;
+                }
                 
                 month_order_info_lists[ 0 ].push( individual_order_info );
                 month_order_info_lists[ individual_order_info.order_date_info.month ].push( individual_order_info );
@@ -1503,8 +1517,12 @@ var TemplateOrderHistoryFilter = {
             individual_order_info = {},
             jq_order_info = jq_order.children( '.order-info' ),
             jq_order_info_left = jq_order_info.find( '.a-col-left' ),
-            order_date = jq_order_info_left.find( '.a-span3 .value' ).text().trim(),
-            order_date_info = {},
+            jq_order_date = jq_order_info_left.find( '.a-span3 .value' ),
+            order_date = jq_order_date.text().trim(),
+            order_date_info = { year : -1, month : -1, date : -1 },
+            order_year,
+            order_month,
+            order_day,
             order_price = jq_order_info_left.find( '.a-span2 .value' ).text().trim(),
             order_price_number = ( typeof order_price == 'string' ) ? parseInt( order_price.replace( /[^\d.\-]/g, '' ), 10 ) : 0,
             order_destination = jq_order_info_left.find( '.recipient .a-size-base .trigger-text' ).text().trim(),
@@ -1528,9 +1546,25 @@ var TemplateOrderHistoryFilter = {
             search_index_text = '';
         
         if ( ( typeof order_date == 'string' ) && ( order_date.match( /^[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)[^\d]*$/ ) ) ) {
-            order_date_info.year = parseInt( RegExp.$1, 10 );
-            order_date_info.month = parseInt( RegExp.$2, 10 );
-            order_date_info.date = parseInt( RegExp.$3, 10 );
+            order_year = parseInt( RegExp.$1, 10 );
+            order_month = parseInt( RegExp.$2, 10 );
+            order_day = parseInt( RegExp.$3, 10 );
+            
+            try {
+                if ( ! isNaN( new Date( '' + order_year + '-' + order_month + '-' + order_day ).getTime() ) ) {
+                    order_date_info.year = order_year;
+                    order_date_info.month = order_month;
+                    order_date_info.day = order_day;
+                    order_date_info.date = order_day;
+                }
+            }
+            catch ( error ) {
+            }
+        }
+        
+        if ( order_date_info.month < 0 ) {
+            log_error( '[malformed order date]\n', order_date, '\n', jq_order_date.html() );
+            log_info( jq_order.html() );
         }
         
         if ( order_receipt_url ) {
