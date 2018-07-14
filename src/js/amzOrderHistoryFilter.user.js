@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.12
+// @version         0.1.0.13
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -160,6 +160,13 @@ function log_debug() {
     
     console.log.apply( console, arg_list.concat( to_array( arguments ) ) );
 } // end of log_debug()
+
+
+function log_info() {
+    var arg_list = [ '[' + SCRIPT_NAME + ']', '(' + ( new Date().toISOString() ) + ')' ];
+    
+    console.info.apply( console, arg_list.concat( to_array( arguments ) ) );
+} // end of log_error()
 
 
 function log_error() {
@@ -1577,21 +1584,56 @@ var TemplateOrderHistoryFilter = {
             jq_xhr_list = [];
         
         url_list.forEach( function ( url ) {
-            var jq_xhr = $.ajax( {
-                    url : get_absolute_url( url ),
-                    type : 'GET',
-                    dataType : 'html',
-                    headers : { 'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8" },
-                    //beforeSend : function( xhr ) {
-                    //    xhr.setRequestHeader( 'X-Requested-With', { toString : function () { return '';} } );
-                    //},
-                    crossDomain : true
-                    // リクエストヘッダに X-Requested-With : XMLHttpRequest が含まれると、Amazon から HTML ではない形式で返されてしまう
-                    // → crossDomain を true にして X-Requested-With を送信しないようにする
-                    // ※参考: 
-                    //   [jquery - can i remove the X-Requested-With header from ajax requests? - Stack Overflow](https://stackoverflow.com/questions/3372962/can-i-remove-the-x-requested-with-header-from-ajax-requests)
-                    //   [javascript - jQueryのcrossDomainオプションが効かない - スタック・オーバーフロー](https://ja.stackoverflow.com/questions/5406/jquery%E3%81%AEcrossdomain%E3%82%AA%E3%83%97%E3%82%B7%E3%83%A7%E3%83%B3%E3%81%8C%E5%8A%B9%E3%81%8B%E3%81%AA%E3%81%84)
-                } );
+            var jq_xhr = ( function () {
+                    var $deferred = $.Deferred(),
+                        $promise = $deferred.promise();
+                    
+                    $.ajax( {
+                        url : get_absolute_url( url ),
+                        type : 'GET',
+                        dataType : 'html',
+                        headers : { 'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8" },
+                        //beforeSend : function( xhr ) {
+                        //    xhr.setRequestHeader( 'X-Requested-With', { toString : function () { return '';} } );
+                        //},
+                        crossDomain : true
+                        // リクエストヘッダに X-Requested-With : XMLHttpRequest が含まれると、Amazon から HTML ではない形式で返されてしまう
+                        // → crossDomain を true にして X-Requested-With を送信しないようにする
+                        // ※参考: 
+                        //   [jquery - can i remove the X-Requested-With header from ajax requests? - Stack Overflow](https://stackoverflow.com/questions/3372962/can-i-remove-the-x-requested-with-header-from-ajax-requests)
+                        //   [javascript - jQueryのcrossDomainオプションが効かない - スタック・オーバーフロー](https://ja.stackoverflow.com/questions/5406/jquery%E3%81%AEcrossdomain%E3%82%AA%E3%83%97%E3%82%B7%E3%83%A7%E3%83%B3%E3%81%8C%E5%8A%B9%E3%81%8B%E3%81%AA%E3%81%84)
+                    } )
+                        .done( function ( html, textStatus, jqXHR ) {
+                            $deferred.resolve( {
+                                url : url,
+                                success : true,
+                                html : html,
+                                textStatus : textStatus,
+                                jqXHR : jqXHR
+                            } );
+                        } )
+                        .fail( function ( jqXHR, textStatus, errorThrown ) {
+                            // TODO: HTML 取得に失敗することがあるらしい(バージョン 0.1.0.12にて発生報告有り)
+                            // →当該 URL について、エラー確認用出力追加＆とりあえず無視する
+                            log_error( '[Fetch Failure]\n', url, '\n', jqXHR.status, jqXHR.statusText );
+                            try {
+                                log_info( '[Header]\n', jqXHR.getAllResponseHeaders() );
+                                log_debug( jqXHR.responseText );
+                            }
+                            catch ( error ) {
+                            }
+                            
+                            $deferred.resolve( {
+                                url : url,
+                                success : false,
+                                html : '',
+                                textStatus : textStatus,
+                                jqXHR : jqXHR
+                            } );
+                        } );
+                    
+                    return $promise;
+                } )();
             
             jq_xhr_list.push( jq_xhr );
         } );
@@ -1609,12 +1651,9 @@ var TemplateOrderHistoryFilter = {
                 }
                 
                 xhr_result_list.forEach( function ( xhr_result, index ) {
-                    fetch_result_list.push( {
-                        url : url_list[ index ],
-                        html : xhr_result[ 0 ],
-                        textStatus : xhr_result[ 1 ],
-                        jqXHR : xhr_result[ 2 ]
-                    } );
+                    if ( xhr_result.success ) {
+                        fetch_result_list.push( xhr_result );
+                    }
                 } );
                 
                 callback( {
@@ -1623,7 +1662,8 @@ var TemplateOrderHistoryFilter = {
                 } );
             } )
             .fail( function ( error ) {
-                log_error( error.statusText );
+                // ※ここには入らないはず
+                log_error( '*** [BUG] ***\n', error );
                 
                 callback( {
                     success : false,
