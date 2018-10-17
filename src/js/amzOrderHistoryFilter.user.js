@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.14
+// @version         0.1.0.15
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -1367,10 +1367,32 @@ var TemplateOrderHistoryFilter = {
             max_page_index = 0,
             order_info_page_url_list = [],
             start_ms = new Date().getTime(),
-            last_page_url = $( 'div.pagination-full ul.a-pagination li.a-normal:last a' ).attr( 'href' );
+            last_page_url = $( 'div.pagination-full ul.a-pagination li.a-normal:last a' ).attr( 'href' ),
+            error_button = $( '<button/>' ).css( {
+                'margin-left' : '4px',
+                'color' : 'red'
+            } ),
+            download_text = function ( filename, text ) {
+                var blob = new Blob( [ text ], { type : 'text/plain' } ),
+                    $link = $( '<a>' ).attr( {
+                        'download' : filename,
+                        'href' : URL.createObjectURL( blob )
+                    } ).css( {
+                        'display' : 'inline-block',
+                        'width' : '0',
+                        'height' : '0',
+                        'visibility' : 'hidden'
+                    } ).appendTo( 'body' );
+                
+                $link[ 0 ].click();
+                
+                $link.remove();
+            };
         
         if ( ! last_page_url ) {
-            last_page_url = window.location.href;
+            //last_page_url = window.location.href;
+            // Error logged with the Track&Report JS errors API(http://tiny/1covqr6l8/wamazindeClieUserJava): {"m":"[CSM] Ajax request to same page detected xmlhttprequest : ～
+            last_page_url = window.location.href.replace( /&_aohtimestamp=\d+/g, '' ) + '&_aohtimestamp=' + new Date().getTime() ;
         }
         
         if ( last_page_url.match( /[?&]startIndex=(\d+)/ ) ) {
@@ -1397,7 +1419,27 @@ var TemplateOrderHistoryFilter = {
                 return;
             }
             
+            if ( 0 < result.fetch_failure_list.length ) {
+                var failure_urls_text = result.fetch_failure_list.map( function ( fetch_failure_result ) {
+                        return get_absolute_url( fetch_failure_result.url );
+                    } ).join( '\n' );
+                
+                error_button.text( 'Download failure list' ).click( function ( event ) {
+                    download_text( 'download-error-urls.txt', failure_urls_text );
+                } );
+                self.jq_message.text( 'Partial download failure' ).append( error_button );
+            }
+            
             self.analyze_order_information( result.fetch_result_list );
+            
+            if ( ( result.fetch_failure_list.length <= 0 ) && ( 0 < order_information.order_error_urls.length ) ) {
+                var error_urls_text = order_information.order_error_urls.join( '\n' );
+                
+                error_button.text( 'Download error list' ).click( function ( event ) {
+                    download_text( 'order-error-urls.txt', error_urls_text );
+                } );
+                self.jq_message.text( 'Partial order error' ).append( error_button );
+            }
             
             var destination_infos = order_information.destination_infos,
                 destination_info_list = [],
@@ -1462,7 +1504,8 @@ var TemplateOrderHistoryFilter = {
             
             order_information = self.order_information,
             month_order_info_lists = order_information.month_order_info_lists = {},
-            destination_infos = order_information.destination_infos = {};
+            destination_infos = order_information.destination_infos = {},
+            order_error_urls = order_information.order_error_urls = [];
         
         
         for ( month_number = 0; month_number <= 12; month_number ++ ) {
@@ -1488,6 +1531,10 @@ var TemplateOrderHistoryFilter = {
                 
                 if ( individual_order_info.order_date_info.month < 0 ) {
                     log_info( '[malformed order info]\n', individual_order_info );
+                    
+                    if ( individual_order_info.order_detail_url ) {
+                        order_error_urls.push( get_absolute_url( individual_order_info.order_detail_url ) );
+                    }
                     return;
                 }
                 
@@ -1549,7 +1596,6 @@ var TemplateOrderHistoryFilter = {
             order_year = parseInt( RegExp.$1, 10 );
             order_month = parseInt( RegExp.$2, 10 );
             order_day = parseInt( RegExp.$3, 10 );
-            
             try {
                 if ( ! isNaN( new Date( '' + order_year + '-' + order_month + '-' + order_day ).getTime() ) ) {
                     order_date_info.year = order_year;
@@ -1675,10 +1721,11 @@ var TemplateOrderHistoryFilter = {
         $.when.apply( $, jq_xhr_list )
             .then( function () {
                 var xhr_result_list = [],
-                    fetch_result_list = [];
+                    fetch_result_list = [],
+                    fetch_failure_list = [];
                 
                 if ( jq_xhr_list.length == 1 ) {
-                    xhr_result_list = [ arguments ];
+                    xhr_result_list = [ arguments[ 0 ] ];
                 }
                 else if ( 1 < jq_xhr_list.length ) {
                     xhr_result_list = to_array( arguments );
@@ -1688,11 +1735,15 @@ var TemplateOrderHistoryFilter = {
                     if ( xhr_result.success ) {
                         fetch_result_list.push( xhr_result );
                     }
+                    else {
+                        fetch_failure_list.push( xhr_result );
+                    }
                 } );
                 
                 callback( {
                     success : true,
-                    fetch_result_list : fetch_result_list
+                    fetch_result_list : fetch_result_list,
+                    fetch_failure_list : fetch_failure_list
                 } );
             } )
             .fail( function ( error ) {
