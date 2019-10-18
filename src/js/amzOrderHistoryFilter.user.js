@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.17
+// @version         0.1.0.18
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -506,8 +506,8 @@ function wait_for_rendering( callback, options ) {
 
 // ■ オブジェクトテンプレート {
 var TemplateLoadingDialog = {
-    loading_icon_url : 'https://images-na.ssl-images-amazon.com/images/G/01/payments-portal/r1/loading-4x._CB338200758_.gif',
-    
+    //loading_icon_url : 'https://images-na.ssl-images-amazon.com/images/G/01/payments-portal/r1/loading-4x._CB338200758_.gif',
+    loading_icon_svg : '<svg version="1.1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="none" r="10" stroke-width="4" style="stroke: currentColor; opacity: 0.4;"></circle><path d="M 12,2 a 10 10 -90 0 1 9,5" fill="none" stroke="currentColor" stroke-width="4" />',
     
     init : function ( options ) {
         if ( ! options ) {
@@ -516,10 +516,22 @@ var TemplateLoadingDialog = {
         
         var self = this,
             jq_loading = $( '<div/>' ).addClass( SCRIPT_NAME + '-loading' ).css( {
-                'width' : '100%',
-                'height' : '100%',
-                'background' : 'url(' + self.loading_icon_url + ') center center no-repeat'
-            } ),
+                /*
+                //'width' : '100%',
+                //'height' : '100%',
+                //'background' : 'url(' + self.loading_icon_url + ') center center no-repeat'
+                */
+                'position' : 'absolute',
+                'top' : '0',
+                'right' : '0',
+                'bottom' : '0',
+                'left' : '0',
+                'margin' : 'auto',
+                'width' : '100px',
+                'height' : '100px',
+                'color' : '#F3A847',
+            } ).html( self.loading_icon_svg ),
+            
             jq_loading_dialog = self.jq_loading_dialog = $( '<div/>' ).addClass( SCRIPT_NAME + '-mask' ).css( {
                 'display' : 'none',
                 'position' : 'fixed',
@@ -529,8 +541,15 @@ var TemplateLoadingDialog = {
                 'width' : '100%',
                 'height' : '100%',
                 'background' : 'black',
-                'opacity' : '0.5'
+                'opacity' : '0.5',
             } ).append( jq_loading );
+        
+        $( '<style type="text/css"/>' )
+            .text( [
+                '.' + SCRIPT_NAME + '-loading svg {animation: now_loading 1.5s linear infinite;}',
+                '@keyframes now_loading {0% {transform: rotate(0deg);} 100% {transform: rotate(360deg);}}',
+            ].join( '\n' ) )
+            .appendTo( $( 'head' ) );
         
         $( 'body' ).append( jq_loading_dialog );
         
@@ -1995,7 +2014,7 @@ var TemplateReceiptOutputPage = {
                 '}',
                 'td.addressee-container {position: relative;}',
                 'div.addressee {position: absolute; width: 200%; bottom: 3px; right: 16px; font-size: 14px; text-align: right;}',
-                'div.addressee.digital {bottom: 6px; right: 24px; font-size: 16px;}'
+                'div.addressee.digital {bottom: 6px; right: 24px; font-size: 16px;}',
             ].join( '\n' ) )
             .appendTo( $( 'head' ) );
         
