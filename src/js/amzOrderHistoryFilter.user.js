@@ -468,7 +468,7 @@ function wait_for_rendering( callback, options ) {
         }, // end of finish()
         
         timeover = function () {
-            log_error( 'wait_for_rendering(): timeover' );
+            log_error( 'wait_for_rendering(): timeover', location.href, options );
             
             timeover_timer_id = null;
             
@@ -1604,7 +1604,10 @@ var TemplateOrderHistoryFilter = {
             ].join( ',' ) ),
             jq_order_details = jq_order.children( '.a-box:not(.order-info)' ),
             jq_order_shipment_info_container = jq_order_details.find( '.js-shipment-info-container' ).clone(),
-            jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row:not(:has(.a-button))' ).clone(),
+            //jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row:not(:has(.a-button))' ).clone(),
+            jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row' ).filter( function () {
+                return ( $( this ).find( '.a-button' ).length <= 0 );
+            } ).clone(),
             jq_gift_card_recipient_list = jq_order_item_infos.find( '.gift-card-instance .recipient' ),
             recipient_map = {},
             order_shipment_info_text = '',
@@ -2078,7 +2081,10 @@ var TemplateReceiptOutputPage = {
             return self;
         }
         
-        var jq_addressee_container = jq_receipt_body.find( 'table:first td[align="right"]:first:has(b:contains("様"))' );
+        //var jq_addressee_container = jq_receipt_body.find( 'table:first td[align="right"]:first:has(b:contains("様"))' );
+        var jq_addressee_container = jq_receipt_body.find( 'table:first td[align="right"]:first' ).filter( function () {
+            return ( 0 <= $( this ).find( 'b' ).text().indexOf( '様' ) );
+        } );
         
         if ( jq_addressee_container.length <= 0 ) {
             return self;
@@ -2355,8 +2361,20 @@ var TemplateReceiptOutputPage = {
             jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( '#docs-order-summary-payment-breakdown-container' ),
             jq_payment_summary_price_infos = jq_payment_summary.find( '.pmts-summary-preview-single-item-amount' );
         
-        order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
-        order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
+        /*
+        //order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
+        //order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
+        */
+        order_date = get_formatted_date_string( get_child_text_from_jq_element(
+            jq_order_summary_header.find( 'td' ).filter( function () {
+                return ( 0 <= $( this ).find( 'b' ).text().indexOf( '注文日' ) );
+            } ).first()
+        ) );
+        order_id = get_child_text_from_jq_element( 
+            jq_order_summary_header.find( 'td' ).filter( function () {
+                return ( 0 <= $( this ).find( 'b' ).text().indexOf( '注文番号' ) );
+            } ).first()
+        );
         
         jq_order_summary_content.find( 'table table tr:gt(0)' ).each( function () {
             var jq_item = $( this ),
@@ -2592,11 +2610,30 @@ var TemplateReceiptOutputPage = {
             error_message = ( jq_receipt_body_eu_invoice.parents( 'td[align="right"]:first' ).text() + ' ' + get_absolute_url( jq_receipt_body_eu_invoice.find( 'a:last' ).attr( 'href' ) ) ).replace( /\s+/g, ' ' );
         }
         
-        order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
+        /*
+        //order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
+        //if ( ! order_date ) {
+        //    order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("定期おトク便")):first' ) ) );
+        //}
+        //order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
+        */
+        order_date = get_formatted_date_string( get_child_text_from_jq_element(
+            jq_order_summary_header.find( 'td' ).filter( function () {
+                return ( 0 <= $( this ).find( 'b' ).text().indexOf( '注文日' ) );
+            } ).first()
+        ) );
         if ( ! order_date ) {
-            order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("定期おトク便")):first' ) ) );
+            order_date = get_formatted_date_string( get_child_text_from_jq_element(
+                jq_order_summary_header.find( 'td' ).filter( function () {
+                    return ( 0 <= $( this ).find( 'b' ).text().indexOf( '定期おトク便' ) );
+                } ).first()
+            ) );
         }
-        order_id = get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文番号")):first' ) );
+        order_id = get_child_text_from_jq_element(
+            jq_order_summary_header.find( 'td' ).filter( function () {
+                return ( 0 <= $( this ).find( 'b' ).text().indexOf( '注文番号' ) );
+            } ).first()
+        );
         
         order_billing_destination = get_child_text_from_jq_element( jq_payment_billing_destination.find( '.displayAddressFullName' ) );
         
@@ -2624,7 +2661,12 @@ var TemplateReceiptOutputPage = {
         //order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("商品の小計")) > td[align="right"]:eq(-1)' ) ) );
         //order_total_price = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"]:contains("注文合計")) > td[align="right"]:eq(-1)' ) ) );
         */
-        order_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"] > b:contains("ご請求額")) > td[align="right"]:eq(-1) b' ) ) );
+        //order_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_total.find( 'tr:has(td[align="right"] > b:contains("ご請求額")) > td[align="right"]:eq(-1) b' ) ) );
+        order_billing_amount = get_price_number( get_child_text_from_jq_element(
+            jq_payment_total.find( 'tr' ).filter( function () {
+                return ( 0 <= $( this ).find( 'td[align="right"] > b' ).text().indexOf( 'ご請求額' ) );
+            } ).find( '> td[align="right"]:eq(-1) b' )
+        ) );
         
         jq_payment_summary.contents().each( function () {
             var text_value = '',
@@ -2733,7 +2775,10 @@ var TemplateReceiptOutputPage = {
                 
                 jq_order_summary_items.each( function () {
                     var jq_item = $( this ),
-                        jq_item_columns = jq_item.find( 'tbody:first > tr > td:not(:has(hr[noshade]))' );
+                        //jq_item_columns = jq_item.find( 'tbody:first > tr > td:not(:has(hr[noshade]))' );
+                        jq_item_columns = jq_item.find( 'tbody' ).first().find( '> tr > td' ).filter( function () {
+                            return ( $( this ).find( 'hr[noshade]' ).length <= 0 );
+                        } );
                     
                     if ( jq_item_columns.length < 2 ) {
                         return;
@@ -3612,7 +3657,11 @@ function init_order_page_in_iframe( open_parameters ) {
                 refund_info.refund_invoice_url = get_absolute_url( refund_invoice_url );
             }
             
-            jq_html_fragment.find( '#digitalOrderSummaryContainer > .orderSummary:has(.section-header:contains("払い戻し")) > table.sample > tbody > tr' ).each( function () {
+            //jq_html_fragment.find( '#digitalOrderSummaryContainer > .orderSummary:has(.section-header:contains("払い戻し")) > table.sample > tbody > tr' )
+            jq_html_fragment.find( '#digitalOrderSummaryContainer > .orderSummary' ).filter( function () {
+                return ( 0 <= $( this ).find( '.section-header' ).text().indexOf( '払い戻し' ) );
+            } ).find( '> table.sample > tbody > tr' )
+            .each( function () {
                 var jq_refund = $( this );
                 
                 refund_list.push( {
@@ -3632,7 +3681,13 @@ function init_order_page_in_iframe( open_parameters ) {
                     refund_list : refund_list
                 };
             
-            jq_html_fragment.find( '#orderDetails .a-spacing-base .a-row.a-expander-container:has(.a-expander-prompt:contains("取引履歴")) .a-expander-content .a-color-success:has(.a-text-bold:contains("返金"))' ).each( function () {
+            //jq_html_fragment.find( '#orderDetails .a-spacing-base .a-row.a-expander-container:has(.a-expander-prompt:contains("取引履歴")) .a-expander-content .a-color-success:has(.a-text-bold:contains("返金"))' )
+            jq_html_fragment.find( '#orderDetails .a-spacing-base .a-row.a-expander-container' ).filter( function () {
+                return ( 0 <= $( this ).find( '.a-expander-prompt' ).text().indexOf( '取引履歴' ) );
+            } ).find( '.a-expander-content .a-color-success' ).filter( function () {
+                return ( 0 <= $( this ).find( '.a-text-bold' ).text().indexOf( '返金' ) );
+            } )
+            .each( function () {
                 var jq_refund = $( this ),
                     refund_text = jq_refund.find( '.a-text-bold:contains("返金")' ).text().trim();
                 
@@ -3664,7 +3719,13 @@ function init_order_page_in_iframe( open_parameters ) {
         get_item_info_list_nondigital = function ( jq_html_fragment ) {
             var item_info_list = [];
             
-            jq_html_fragment.find( '.shipment:not(:has(.a-text-bold:contains("返品"))) a.a-link-normal[href*="/gp/product/"]:not(:has(img))' ).each( function () {
+            //jq_html_fragment.find( '.shipment:not(:has(.a-text-bold:contains("返品"))) a.a-link-normal[href*="/gp/product/"]:not(:has(img))' )
+            jq_html_fragment.find( '.shipment' ).filter( function () {
+                return ( $( this ).find( '.a-text-bold' ).text().indexOf( '返品' ) <  0 );
+            } ).find( 'a.a-link-normal[href*="/gp/product/"]' ).filter( function () {
+                return ( $( this ).find( 'img' ).length <= 0 );
+            } )
+            .each( function () {
                 var jq_item_link = $( this );
                 
                 item_info_list.push( {
