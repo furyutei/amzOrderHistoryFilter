@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.16
+// @version         0.1.0.17
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -2555,6 +2555,7 @@ var TemplateReceiptOutputPage = {
             card_info_list = [],
             payment_method_list = [],
             payment_method = '',
+            error_message = '',
             
             jq_order_container = jq_receipt_body.find( 'table:eq(0) > tbody > tr > td' ),
             jq_order_summary_header = jq_order_container.children( 'table:eq(0)' ),
@@ -2564,8 +2565,13 @@ var TemplateReceiptOutputPage = {
             jq_payment_billing_destination = jq_payment_summary.find( '.displayAddressDiv .displayAddressUL' ),
             jq_payment_total = jq_payment_summary.find( 'table > tbody > tr > td[align="right"]' ),
             jq_payment_card_info_list = jq_payment_content.children( 'tr:eq(2)' ).find( 'table table tr' ),
+            jq_receipt_body_eu_invoice = jq_receipt_body.find( '#eu-invoice' ),
             
             payment_info_list = [];
+        
+        if ( 0 < jq_receipt_body_eu_invoice.length ) {
+            error_message = ( jq_receipt_body_eu_invoice.parents( 'td[align="right"]:first' ).text() + ' ' + get_absolute_url( jq_receipt_body_eu_invoice.find( 'a:last' ).attr( 'href' ) ) ).replace( /\s+/g, ' ' );
+        }
         
         order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
         if ( ! order_date ) {
@@ -2882,6 +2888,7 @@ var TemplateReceiptOutputPage = {
             card_info_list : card_info_list,
             payment_method_list : payment_method_list,
             payment_info_list : payment_info_list,
+            error_message : error_message,
         };
         
         return order_parameters;
@@ -3095,7 +3102,11 @@ var TemplateReceiptOutputPage = {
                         item.price, // 価格
                         item.number, // 個数
                         ( item_index == 0 ) ? order_parameters.order_subtotal_price : '', // 商品小計
-                        ( item_index == 0 ) ? order_parameters.order_total_price : '', // 注文合計(送料・手数料含む)
+                        /*
+                        //( item_index == 0 ) ? order_parameters.order_total_price : '', // 注文合計(送料・手数料含む)
+                        // TODO: order_total_price は、手数料・割引などが反映されている場合（プロモーション等）とされていない場合（Amazonポイント等）がある
+                        */
+                        ( item_index == 0 ) ? order_parameters.order_subtotal_price : '', // 注文合計(送料・手数料含む)
                         order_parameters.order_destination, // お届け先
                         order_parameters.order_status, // 状態
                         order_parameters.order_billing_destination, // 請求先
@@ -3163,7 +3174,7 @@ var TemplateReceiptOutputPage = {
                     order_parameters.order_date, // 注文日
                     order_parameters.order_id, // 注文番号
                     '（注文全体）', // 商品名
-                    '', // 付帯情報
+                    ( order_parameters.error_message ) ? order_parameters.error_message : '', // 付帯情報
                     '', // 価格
                     '', // 個数
                     '', // 商品小計
@@ -3257,8 +3268,8 @@ var TemplateReceiptOutputPage = {
                             //( item_index == 0 ) ? order_parameters.order_subtotal_price : '', // 商品小計
                             //( item_index == 0 ) ? order_parameters.order_total_price : '', // 注文合計(送料・手数料含む)
                             */
-                            item.price * item.number,
-                            ( item_index == 0 ) ? order_parameters.order_total_price : '', // 発送合計
+                            ( item_index == 0 ) ? order_parameters.order_total_price : '', // 商品小計
+                            '', // 注文合計
                             item.destination, // お届け先
                             item.status, // 状態
                             order_parameters.order_billing_destination, // 請求先
