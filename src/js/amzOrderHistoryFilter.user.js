@@ -2,7 +2,7 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.18
+// @version         0.1.0.19
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -64,6 +64,7 @@ var OPTIONS = {
     DEFAULT_FILTER_INCLUDE_DIGITAL : true, // フィルタ対象(デジタルコンテンツ)のデフォルト値(true: 有効)
     DEFAULT_FILTER_INCLUDE_NONDIGITAL : false, // フィルタ対象(デジタルコンテンツ以外)のデフォルト値(true: 有効)
     DEFAULT_FILTER_INCLUDE_RESERVATION : true, // フィルタ対象(予約)のデフォルト値(true: 有効)
+    DEFAULT_FILTER_INCLUDE_PRICE_ZERO : true, // フィルタ対象(合計￥0)のデフォルト値(true: 有効)
     
     OPERATION : true // true: 動作中、false: 停止中
 };
@@ -111,6 +112,7 @@ OPTIONS.SELECT_MONTH_ALL_TEXT = '全て';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_DIGITAL_TEXT = 'デジタル';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT = 'デジタル以外';
 OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT = '予約分を含む';
+OPTIONS.CHECKBOX_FILTER_INCLUDE_PRICE_ZERO = '合計￥0の注文を含む';
 OPTIONS.COUNTER_LABEL_DIGITAL_TEXT = 'デジタル';
 OPTIONS.COUNTER_LABEL_NONDIGITAL_TEXT = 'デジタル以外';
 OPTIONS.SELECT_DESTINATION_LABEL_TEXT = 'お届け先';
@@ -126,6 +128,7 @@ OPTIONS.CHANGE_ADDRESSEE_PROMPT_MESSAGE = '宛名を指定してください';
 OPTIONS.PRINT_PREVIEW_BUTTON_TEXT = '印刷プレビュー';
 OPTIONS.TEXT_FILTER_LABEL_TEXT = '絞り込み';
 OPTIONS.TEXT_FILTER_PLACEHOLDER_TEXT = 'キーワード、または、注文番号を入力';
+OPTIONS.TEXT_FILTER_HELP_TEXT = '" "(スペース)区切→AND検索、" OR "区切→OR検索';
 OPTIONS.TEXT_FILTER_KEYWORDS_RULED_OUT_CHECKBOX_LABEL_TEXT = '除外';
 OPTIONS.TEXT_FILTER_APPLY_BUTTUON_TEXT = '適用';
 OPTIONS.TEXT_FILTER_CLEAR_BUTTUON_TEXT = 'クリア';
@@ -706,7 +709,10 @@ var TemplateOrderHistoryFilter = {
         '    <label><span class="month-label label left"></span><select name="month"></select></label>',
         '    <label><input name="include-digital" type="checkbox" /><span class="include-digital-label label"></span></label>',
         '    <label><input name="include-nondigital" type="checkbox" /><span class="include-nondigital-label label"></span></label>',
-        '    <label>(<input name="include-reservation" type="checkbox" /><span class="include-reservation-label label"></span>)</label>',
+        '    (',
+        '    <label><input name="include-reservation" type="checkbox" /><span class="include-reservation-label label"></span></label>',
+        '    <label><input name="include-price-zero" type="checkbox" /><span class="include-price-zero-label label"></span></label>',
+        '    )',
         '    <br />',
         '    <label><span class="destination-label label left"></span><select name="destination"></select></label>',
         '    <br />',
@@ -718,11 +724,9 @@ var TemplateOrderHistoryFilter = {
         '  </div>',
         '  <div class="operation-container">',
         '    <div class="counter-container">',
-        '      <div class="counter digital"><span class="label"></span>:<span class="number">-</span></div>',
-        '      <div class="counter nondigital"><span class="label"></span>:<span class="number">-</span></div>',
+        '      <div class="counter digital"><span class="label"></span>:<span class="number">-</span><button name="print-receipt"></button></div>',
+        '      <div class="counter nondigital"><span class="label"></span>:<span class="number">-</span><button name="print-receipt"></button></div>',
         '    </div>',
-        '    <button name="print-receipt"></button>',
-        '    <br />',
         '    <div class="message"></div>',
         '  </div>',
         '</div>'
@@ -733,6 +737,7 @@ var TemplateOrderHistoryFilter = {
         include_digital : SCRIPT_NAME + '_include_digital',
         include_nondigital : SCRIPT_NAME + '_include_nondigital',
         include_reservation : SCRIPT_NAME + '_include_reservation',
+        include_price_zero : SCRIPT_NAME + '_include_price_zero',
     },
     
     
@@ -779,6 +784,13 @@ var TemplateOrderHistoryFilter = {
             loading_dialog = self.loading_dialog = object_extender( TemplateLoadingDialog ).init();
         
         self.init_filter_options().init_filter_control();
+        
+        $( '<style type="text/css"/>' )
+            .text( [
+                //'#' + SCRIPT_NAME + '-filter-control button[name="print-receipt"] {background: lightblue;}',
+                '#' + SCRIPT_NAME + '-filter-control button[name="print-receipt"][disabled] {background: lightgray; color: white; border-style: dotted;}',
+            ].join( '\n' ) )
+            .appendTo( $( 'head' ) );
         
         return self;
     }, // end of init()
@@ -848,6 +860,7 @@ var TemplateOrderHistoryFilter = {
         init_value( 'include_digital', OPTIONS.DEFAULT_FILTER_INCLUDE_DIGITAL );
         init_value( 'include_nondigital', OPTIONS.DEFAULT_FILTER_INCLUDE_NONDIGITAL );
         init_value( 'include_reservation', OPTIONS.DEFAULT_FILTER_INCLUDE_RESERVATION );
+        init_value( 'include_price_zero', OPTIONS.DEFAULT_FILTER_INCLUDE_PRICE_ZERO );
         
         return self;
     }, // end of init_filter_options()
@@ -885,6 +898,7 @@ var TemplateOrderHistoryFilter = {
             jq_checkbox_include_digital = self.jq_checkbox_include_digital = jq_parameter_container.find( 'input[name="include-digital"]' ),
             jq_checkbox_include_nondigital = self.jq_checkbox_include_nondigital = jq_parameter_container.find( 'input[name="include-nondigital"]' ),
             jq_checkbox_include_reservation = self.jq_checkbox_include_reservation = jq_parameter_container.find( 'input[name="include-reservation"]' ),
+            jq_checkbox_include_price_zero = self.jq_checkbox_include_price_zero = jq_parameter_container.find( 'input[name="include-price-zero"]' ),
             
             jq_select_destination = self.jq_select_destination = jq_parameter_container.find( 'select[name="destination"]' )
                 .prop( 'disabled', 'disabled' )
@@ -896,6 +910,7 @@ var TemplateOrderHistoryFilter = {
             
             jq_input_text_filter = self.jq_input_text_filter = jq_parameter_container.find( 'input[name="text-filter-keywords"]' )
                 .attr( 'placeholder', OPTIONS.TEXT_FILTER_PLACEHOLDER_TEXT )
+                .attr( 'title', OPTIONS.TEXT_FILTER_HELP_TEXT )
                 .prop( 'disabled', 'disabled' )
                 .css( {
                     'min-width' : '500px',
@@ -923,19 +938,29 @@ var TemplateOrderHistoryFilter = {
                 'color' : 'lightgray',
                 'vertical-align' : 'top'
             } ),
-            jq_counter_digital = jq_counter_container.find( '.counter.digital' ),
-            jq_counter_nondigital = jq_counter_container.find( '.counter.nondigital' ),
+            jq_counter_digital = jq_counter_container.find( '.counter.digital' ).css( {
+                'padding-bottom' : '4px',
+            } ),
+            jq_counter_nondigital = jq_counter_container.find( '.counter.nondigital' ).css( {
+            } ),
             jq_counter_digital_number = self.jq_counter_digital_number = jq_counter_digital.find( '.number' ),
             jq_counter_nondigital_number = self.jq_counter_nondigital_number = jq_counter_nondigital.find( '.number' ),
             
             jq_operation_continer = jq_filter_control.find( '.operation-container' ).css( {
                 'position' : 'absolute',
-                'top' : '0',
+                //'top' : '0',
+                'top' : '-24px',
                 'right' : '0',
                 'text-align' : 'right'
             } ),
-            jq_button_print_receipt = self.jq_button_print_receipt = jq_operation_continer.find( 'button[name="print-receipt"]' )
+            jq_button_print_receipt_digital = self.jq_button_print_receipt_digital = jq_counter_digital.find( 'button[name="print-receipt"]' )
                 .text( OPTIONS.PRINT_RECEIPT_BUTTON_TEXT )
+                .attr( 'title', OPTIONS.CHECKBOX_FILTER_INCLUDE_DIGITAL_TEXT )
+                .prop( 'disabled', 'disabled' ),
+            
+            jq_button_print_receipt_nondigital = self.jq_button_print_receipt_nondigital = jq_counter_nondigital.find( 'button[name="print-receipt"]' )
+                .text( OPTIONS.PRINT_RECEIPT_BUTTON_TEXT )
+                .attr( 'title', OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT )
                 .prop( 'disabled', 'disabled' ),
             
             jq_message = self.jq_message = jq_filter_control.find( '.message' ).css( {
@@ -977,14 +1002,21 @@ var TemplateOrderHistoryFilter = {
         jq_filter_control.find( 'span.number' ).css( {
             'margin' : '0',
             'display' : 'inline-block',
-            'min-width' : '32px',
+            //'min-width' : '32px',
+            'min-width' : '64px',
             'text-align' : 'center'
+        } );
+        
+        jq_counter_container.css( {
+            'display' : 'flex',
+            'flex-direction' : 'column',
         } );
         
         jq_parameter_container.find( '.month-label' ).text( OPTIONS.SELECT_MONTH_LABEL_TEXT );
         jq_parameter_container.find( '.include-digital-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_DIGITAL_TEXT );
         jq_parameter_container.find( '.include-nondigital-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_NONDIGITAL_TEXT );
         jq_parameter_container.find( '.include-reservation-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_RESERVATION_TEXT );
+        jq_parameter_container.find( '.include-price-zero-label' ).text( OPTIONS.CHECKBOX_FILTER_INCLUDE_PRICE_ZERO );
         jq_parameter_container.find( '.destination-label' ).text( OPTIONS.SELECT_DESTINATION_LABEL_TEXT );
         jq_parameter_container.find( '.text-filter-label' ).text( OPTIONS.TEXT_FILTER_LABEL_TEXT );
         jq_parameter_container.find( '.text-filter-keywords-ruled-out-label' ).text( OPTIONS.TEXT_FILTER_KEYWORDS_RULED_OUT_CHECKBOX_LABEL_TEXT );
@@ -1047,6 +1079,12 @@ var TemplateOrderHistoryFilter = {
                 self.onchange_include_reservation( event );
             } );
         
+        jq_checkbox_include_price_zero
+            .prop( 'checked', filter_options.include_price_zero )
+            .change( function ( event ) {
+                self.onchange_include_price_zero( event );
+            } );
+        
         jq_select_destination.val( '' );
         
         if ( IS_EDGE ) {
@@ -1084,9 +1122,14 @@ var TemplateOrderHistoryFilter = {
                 self.onclick_text_filter_clear_button( event );
             } );
         
-        jq_button_print_receipt
+        jq_button_print_receipt_digital
             .click( function ( event ) {
-                self.onclick_button_print_receipt( event );
+                self.onclick_button_print_receipt_digital( event );
+            } );
+        
+        jq_button_print_receipt_nondigital
+            .click( function ( event ) {
+                self.onclick_button_print_receipt_nondigital( event );
             } );
         
         if ( self.under_suspension ) {
@@ -1171,6 +1214,25 @@ var TemplateOrderHistoryFilter = {
     }, // end of onchange_include_reservation()
     
     
+    onchange_include_price_zero : function ( event ) {
+        var self = this,
+            filter_option_keys = self.filter_option_keys,
+            filter_options = self.filter_options,
+            jq_checkbox_include_price_zero = self.jq_checkbox_include_price_zero,
+            is_checked = jq_checkbox_include_price_zero.is( ':checked' );
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        filter_options.include_price_zero = is_checked;
+        set_value( filter_option_keys.include_price_zero, ( is_checked ) ? '1' : '0' );
+        
+        self.update_order_container();
+        
+        return self;
+    }, // end of onchange_include_price_zero()
+    
+    
     onchange_destination : function ( event ) {
         var self = this,
             jq_select_destination = self.jq_select_destination;
@@ -1225,7 +1287,7 @@ var TemplateOrderHistoryFilter = {
     }, // end of onclick_text_filter_clear_button()
     
     
-    onclick_button_print_receipt : function ( event ) {
+    onclick_button_print_receipt_digital : function ( event ) {
         var self = this;
         
         event.stopPropagation();
@@ -1235,10 +1297,26 @@ var TemplateOrderHistoryFilter = {
             return self;
         }
         
-        self.open_order_receipts_for_print();
+        self.open_order_receipts_for_print_digital();
         
         return self;
-    }, // end of onclick_button_print_receipt()
+    }, // end of onclick_button_print_receipt_digital()
+    
+    
+    onclick_button_print_receipt_nondigital : function ( event ) {
+        var self = this;
+        
+        event.stopPropagation();
+        event.preventDefault();
+        
+        if ( ! self.order_information.is_ready ) {
+            return self;
+        }
+        
+        self.open_order_receipts_for_print_nondigital();
+        
+        return self;
+    }, // end of onclick_button_print_receipt_nondigital()
     
     
     update_order_container : function () {
@@ -1270,6 +1348,8 @@ var TemplateOrderHistoryFilter = {
             jq_insert_point = jq_order_container.children( '.a-row:last' ),
             jq_counter_digital_number = self.jq_counter_digital_number,
             jq_counter_nondigital_number = self.jq_counter_nondigital_number,
+            jq_button_print_receipt_digital = self.jq_button_print_receipt_digital,
+            jq_button_print_receipt_nondigital = self.jq_button_print_receipt_nondigital,
             digital_counter = 0,
             nondigital_counter = 0,
             digital_reservation_counter = 0,
@@ -1308,6 +1388,9 @@ var TemplateOrderHistoryFilter = {
                 return;
             }
             if ( ( ! filter_options.include_reservation ) && ( order_info.is_reservation ) ) {
+                return;
+            }
+            if ( ( ! filter_options.include_price_zero ) && ( order_info.order_price_number === 0 ) ) {
                 return;
             }
             
@@ -1362,6 +1445,9 @@ var TemplateOrderHistoryFilter = {
         jq_counter_digital_number.text( digital_counter );
         jq_counter_nondigital_number.text( nondigital_counter );
         
+        jq_button_print_receipt_digital.prop( 'disabled', ( digital_counter <= 0 ) );
+        jq_button_print_receipt_nondigital.prop( 'disabled', ( nondigital_counter <= 0 ) );
+        
         var scroll_top = $( window ).scrollTop();
         
         $( window ).scrollTop( scroll_top + 1 );
@@ -1372,6 +1458,9 @@ var TemplateOrderHistoryFilter = {
             
             self.loading_dialog.hide();
         }, 1 );
+        
+        $( '#rhf' ).hide();
+        //$( '#rightRail' ).hide();
         
         $( window ).on( 'scroll.update_order_container resize.update_order_container', on_scroll );
         
@@ -1410,7 +1499,7 @@ var TemplateOrderHistoryFilter = {
         
         if ( ! last_page_url ) {
             //last_page_url = window.location.href;
-            // Error logged with the Track&Report JS errors API(http://tiny/1covqr6l8/wamazindeClieUserJava): {"m":"[CSM] Ajax request to same page detected xmlhttprequest : ～
+            // Error logged with the Track&Report JS errors API(http://tiny/1covqr6l8/wamazindeClieUserJava): {"m":"[CSM] Ajax request to same page detected xmlhttprequest : ～ }
             last_page_url = window.location.href.replace( /&_aohtimestamp=\d+/g, '' ) + '&_aohtimestamp=' + new Date().getTime() ;
         }
         
@@ -1503,7 +1592,9 @@ var TemplateOrderHistoryFilter = {
             self.jq_checkbox_text_filter_keywords_ruled_out.prop( 'disabled', false ).parent( 'label' ).css( 'opacity', '1' );
             self.jq_button_text_filter_apply.prop( 'disabled', false );
             self.jq_button_text_filter_clear.prop( 'disabled', false );
-            self.jq_button_print_receipt.prop( 'disabled', false );
+            //self.jq_button_print_receipt.prop( 'disabled', false );
+            self.jq_button_print_receipt_digital.prop( 'disabled', false );
+            self.jq_button_print_receipt_nondigital.prop( 'disabled', false );
             self.jq_counter_container.css( 'color', 'gray' );
             
             $( 'div.pagination-full' ).hide();
@@ -1776,7 +1867,7 @@ var TemplateOrderHistoryFilter = {
             } )
             .fail( function ( error ) {
                 // ※ここには入らないはず
-                log_error( '*** [BUG] ***\n', error );
+                log_error( '*** [BUG] ***\n', error, jq_xhr_list );
                 
                 callback( {
                     success : false,
@@ -1853,83 +1944,61 @@ var TemplateOrderHistoryFilter = {
     }, // end of check_text_filter_is_hit()
     
     
-    open_order_receipts_for_print : function () {
+    open_order_receipts_for_print : function ( is_digital ) {
         var self = this,
             order_information = self.order_information,
             current_order_info_list = order_information.current_order_info_list,
-            digital_order_urls = [],
-            nondigital_order_urls = [],
-            print_digital = true,
-            print_nondigital = true,
+            order_urls = [],
             show_print_dialog = true;
         
         current_order_info_list.forEach( function ( order_info ) {
             var order_receipt_url = order_info.order_receipt_url;
             
-            if ( order_receipt_url ) {
-                if ( order_info.is_digital ) {
-                    digital_order_urls.push( order_receipt_url );
-                }
-                else {
-                    nondigital_order_urls.push( order_receipt_url );
-                }
+            if ( ! order_receipt_url ) {
+                return;
+            }
+            
+            if ( is_digital ^ order_info.is_digital ) {
+                return;
+            }
+            
+            order_urls.push( order_receipt_url );
+        } );
+        
+        if ( order_urls.length <= 0 ) {
+            return self;
+        }
+        
+        order_urls.reverse();
+        
+        var first_order_url = order_urls.shift();
+       
+        open_child_window( self.get_signin_url( first_order_url ), {
+            open_parameters : {
+                is_digital : is_digital,
+                target_period : self.target_period,
+                target_month : self.target_month,
+                target_destination : self.target_destination,
+                target_keyword_string : self.target_keyword_string,
+                target_keyword_is_ruled_out : self.target_keyword_is_ruled_out,
+                first_order_url : first_order_url,
+                additional_order_urls : order_urls,
+                show_print_dialog : show_print_dialog
             }
         } );
         
-        digital_order_urls.reverse();
-        nondigital_order_urls.reverse();
-        
-        if ( digital_order_urls.length <= 0 ) {
-            print_digital = false;
-        }
-        
-        if ( nondigital_order_urls.length <= 0 ) {
-            print_nondigital = false;
-        }
-        
-        if ( print_digital &&  print_nondigital ) {
-            // TODO: 両方で印刷ダイアログを表示しようとしても、先に表示されたダイアログを閉じるまで、もう片方が動作しなくなる
-            show_print_dialog = false;
-        }
-        
-        if ( print_nondigital ) {
-            var nondigital_first_order_url = nondigital_order_urls.shift();
-           
-            open_child_window( self.get_signin_url( nondigital_first_order_url ), {
-                open_parameters : {
-                    is_digital : false,
-                    target_period : self.target_period,
-                    target_month : self.target_month,
-                    target_destination : self.target_destination,
-                    target_keyword_string : self.target_keyword_string,
-                    target_keyword_is_ruled_out : self.target_keyword_is_ruled_out,
-                    first_order_url : nondigital_first_order_url,
-                    additional_order_urls : nondigital_order_urls,
-                    show_print_dialog : show_print_dialog
-                }
-            } );
-        }
-        
-        if ( print_digital ) {
-            var digital_first_order_url = digital_order_urls.shift();
-           
-            open_child_window( self.get_signin_url( digital_first_order_url ), {
-                open_parameters : {
-                    is_digital : true,
-                    target_period : self.target_period,
-                    target_month : self.target_month,
-                    target_destination : self.target_destination,
-                    target_keyword_string : self.target_keyword_string,
-                    target_keyword_is_ruled_out : self.target_keyword_is_ruled_out,
-                    first_order_url : digital_first_order_url,
-                    additional_order_urls : digital_order_urls,
-                    show_print_dialog : show_print_dialog
-                }
-            } );
-        }
-        
         return self;
     }, // end of open_order_receipts_for_print()
+    
+    
+    open_order_receipts_for_print_digital : function () {
+        return this.open_order_receipts_for_print( true );
+    }, // end of open_order_receipts_for_print_digital()
+    
+    
+    open_order_receipts_for_print_nondigital : function () {
+        return this.open_order_receipts_for_print( false );
+    }, // end of open_order_receipts_for_print_nondigital()
     
     
     // 領収書読込中に認証を要求されてしまう場合がある
