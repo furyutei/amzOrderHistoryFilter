@@ -3808,8 +3808,8 @@ function on_update_options( updated_options ) {
         init_order_history_page();
         return;
     }
-
-    if ( updated_options.hasOwnProperty( 'OPERATION' ) ) {
+    
+    if ( Object.hasOwnProperty.call( updated_options, 'OPERATION' ) ) {
         if ( OPTIONS.OPERATION ) {
             ORDER_HISTORY_FILTER.activate();
         }

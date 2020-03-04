@@ -90,7 +90,7 @@ function get_init_function( message_type, option_name_to_function_map, namespace
         }
         
         Object.keys( option_name_to_function_map ).forEach( function ( option_name ) {
-            if ( ! ( response.hasOwnProperty( option_name ) ) ) {
+            if ( ! ( Object.hasOwnProperty.call( response, option_name ) ) ) {
                 options[ option_name ] = null;
                 return;
             }
