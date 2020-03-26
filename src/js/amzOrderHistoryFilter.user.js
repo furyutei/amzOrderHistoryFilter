@@ -2,13 +2,14 @@
 // @name            amzOrderHistoryFilter
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.19
+// @version         0.1.0.20
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
 // @include         https://www.amazon.co.jp/ap/signin*
 // @require         https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js
+// @require         https://greasyfork.org/scripts/398566-concurrent-promise/code/concurrent_promise.js?version=784632
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @description     アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。
@@ -1780,13 +1781,11 @@ var TemplateOrderHistoryFilter = {
     
     fetch_all_html : function ( url_list, callback ) {
         var self = this,
-            jq_xhr_list = [];
-        
-        url_list.forEach( function ( url ) {
-            var jq_xhr = ( function () {
-                    var $deferred = $.Deferred(),
-                        $promise = $deferred.promise();
-                    
+            
+            max_concurrent_number = 10,
+            
+            _fetch_url = ( url ) => {
+                return new Promise( ( resolve, reject ) => {
                     $.ajax( {
                         url : get_absolute_url( url ),
                         type : 'GET',
@@ -1802,78 +1801,63 @@ var TemplateOrderHistoryFilter = {
                         //   [jquery - can i remove the X-Requested-With header from ajax requests? - Stack Overflow](https://stackoverflow.com/questions/3372962/can-i-remove-the-x-requested-with-header-from-ajax-requests)
                         //   [javascript - jQueryのcrossDomainオプションが効かない - スタック・オーバーフロー](https://ja.stackoverflow.com/questions/5406/jquery%E3%81%AEcrossdomain%E3%82%AA%E3%83%97%E3%82%B7%E3%83%A7%E3%83%B3%E3%81%8C%E5%8A%B9%E3%81%8B%E3%81%AA%E3%81%84)
                     } )
-                        .done( function ( html, textStatus, jqXHR ) {
-                            $deferred.resolve( {
-                                url : url,
-                                success : true,
-                                html : html,
-                                textStatus : textStatus,
-                                jqXHR : jqXHR
-                            } );
-                        } )
-                        .fail( function ( jqXHR, textStatus, errorThrown ) {
-                            // TODO: HTML 取得に失敗することがあるらしい(バージョン 0.1.0.12にて発生報告有り)
-                            // →当該 URL について、エラー確認用出力追加＆とりあえず無視する
-                            log_error( '[Fetch Failure]\n', url, '\n', jqXHR.status, jqXHR.statusText );
-                            try {
-                                log_info( '[Header]\n', jqXHR.getAllResponseHeaders() );
-                                log_debug( jqXHR.responseText );
-                            }
-                            catch ( error ) {
-                            }
-                            
-                            $deferred.resolve( {
-                                url : url,
-                                success : false,
-                                html : '',
-                                textStatus : textStatus,
-                                jqXHR : jqXHR
-                            } );
+                    .done( ( html, textStatus, jqXHR ) => {
+                        resolve( {
+                            url : url,
+                            success : true,
+                            html : html,
+                            textStatus : textStatus,
+                            jqXHR : jqXHR
                         } );
-                    
-                    return $promise;
-                } )();
-            
-            jq_xhr_list.push( jq_xhr );
-        } );
+                    } )
+                    .fail( ( jqXHR, textStatus, errorThrown ) => {
+                        // TODO: HTML 取得に失敗することがあるらしい(バージョン 0.1.0.12にて発生報告有り)
+                        // →当該 URL について、エラー確認用出力追加＆とりあえず無視する
+                        log_error( '[Fetch Failure]\n', url, '\n', jqXHR.status, jqXHR.statusText );
+                        try {
+                            log_info( '[Header]\n', jqXHR.getAllResponseHeaders() );
+                            log_debug( jqXHR.responseText );
+                        }
+                        catch ( error ) {
+                        }
+                        
+                        reject( {
+                            url : url,
+                            success : false,
+                            html : '',
+                            textStatus : textStatus,
+                            jqXHR : jqXHR
+                        } );
+                    } );
+                } );
+            };
         
-        $.when.apply( $, jq_xhr_list )
-            .then( function () {
-                var xhr_result_list = [],
-                    fetch_result_list = [],
-                    fetch_failure_list = [];
-                
-                if ( jq_xhr_list.length == 1 ) {
-                    xhr_result_list = [ arguments[ 0 ] ];
-                }
-                else if ( 1 < jq_xhr_list.length ) {
-                    xhr_result_list = to_array( arguments );
-                }
-                
-                xhr_result_list.forEach( function ( xhr_result, index ) {
-                    if ( xhr_result.success ) {
-                        fetch_result_list.push( xhr_result );
-                    }
-                    else {
-                        fetch_failure_list.push( xhr_result );
-                    }
-                } );
-                
-                callback( {
-                    success : true,
-                    fetch_result_list : fetch_result_list,
-                    fetch_failure_list : fetch_failure_list
-                } );
-            } )
-            .fail( function ( error ) {
-                // ※ここには入らないはず
-                log_error( '*** [BUG] ***\n', error, jq_xhr_list );
-                
-                callback( {
-                    success : false,
-                    error_message : 'Fetch Failure'
-                } );
+        
+        window.concurrent_promise.execute( url_list.map( ( url ) => _fetch_url.bind( null, url ) ), max_concurrent_number )
+        .then( ( result_info ) => {
+            var fetch_result_list = result_info.success_list.map( worker => worker.result ),
+                fetch_failure_list = result_info.failure_list.map( worker => worker.result );
+            
+            log_debug( 'fetch_all_html() url_list:', url_list );
+            log_debug( 'result_info:', result_info );
+            log_debug( 'fetch_result_list:', fetch_result_list );
+            log_debug( 'fetch_failure_list:', fetch_failure_list );
+            
+            callback( {
+                success : true,
+                fetch_result_list : fetch_result_list,
+                fetch_failure_list : fetch_failure_list,
             } );
+        } )
+        .catch( ( result_info ) => {
+            // ※ここには入らないはず
+            log_error( '*** [BUG] ***\n', result_info );
+            
+            callback( {
+                success : false,
+                error_message : 'Fetch Failure',
+            } );
+        } );
         
         return self;
     }, // end of fetch_all_html()

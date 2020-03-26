@@ -2,7 +2,7 @@
     "manifest_version" : 2,
     "name" : "__MSG_ext_title__",
     "short_name" : "__MSG_ext_short_name__",
-    "version" : "0.1.0.1901",
+    "version" : "0.1.0.2001",
     "description" : "__MSG_ext_description__",
     "author" : "furyu",
     "default_locale" : "ja",
@@ -29,7 +29,7 @@
                 "https://www.amazon.co.jp/gp/css/summary/print.html*",
                 "https://www.amazon.co.jp/ap/signin*"
              ],
-            "js" : [ "js/jquery.min.js", "js/init.js", "js/amzOrderHistoryFilter.user.js" ],
+            "js" : [ "js/jquery.min.js", "js/concurrent_promise.js", "js/init.js", "js/amzOrderHistoryFilter.user.js" ],
             "run_at" : "document_end",
             "all_frames" : true
         }
