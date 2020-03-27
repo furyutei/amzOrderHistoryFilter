@@ -1,5 +1,5 @@
-アマゾン注文履歴フィルタ (amzOrderHistoryFilter)
-================================================
+[アマゾン注文履歴フィルタ (amzOrderHistoryFilter)](https://github.com/furyutei/amzOrderHistoryFilter)
+=====================================================================================================
 
 - License: The MIT license  
 - Copyright (c) 2018 風柳(furyu)  
@@ -29,7 +29,8 @@ Firefox Quantum で、
 ### ユーザースクリプト版（Greasemonkey / Tampermonkey）
 Firefox＋[Tampermonkey](https://addons.mozilla.org/ja/firefox/addon/tampermonkey/)、Google Chrome＋[Tampermonkey](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=ja) の環境で、  
 
-> [ アマゾン注文履歴フィルタ (amzOrderHistoryFilter.user.js)](https://furyutei.work/userjs/furyutei/amzOrderHistoryFilter.user.js)  
+> [アマゾン注文履歴フィルタ (amzOrderHistoryFilter.user.js)](http://furyutei.github.io/amzOrderHistoryFilter/src/js/amzOrderHistoryFilter.user.js)  
+
                                 
 をクリックし、指示に従ってインストール。  
 

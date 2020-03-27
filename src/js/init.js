@@ -4,6 +4,22 @@
 
 if ( typeof browser == 'undefined' ) { window.browser = chrome; }
 
+/*
+//if ( ( typeof content != 'undefined' ) && ( typeof content.XMLHttpRequest == 'function' ) ) {
+//    // Firefox用: [参考](https://memo.furyutei.work/entry/20180718/1531914142)
+//    // TODO: 有効にすると動作が不安定になる
+//    //     No strings exist for this error type aboutNetError.js:417:13
+//    //     setNetErrorMessageFromCode chrome://browser/content/aboutNetError.js:417
+//    jQuery.ajaxSetup( {
+//        xhr : function () {
+//            try {
+//                return new content.XMLHttpRequest();
+//            } catch ( e ) {}
+//        }
+//    } );
+//}
+*/
+
 
 var DEBUG = false,
     SCRIPT_NAME = 'init';

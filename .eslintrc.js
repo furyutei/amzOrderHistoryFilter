@@ -6,6 +6,7 @@ module.exports = {
         "browser": true,
         "es6": true,
         "jquery": true,
+        "node": true,
     },
     "extends": "eslint:recommended",
     "globals": {
@@ -15,6 +16,7 @@ module.exports = {
         "chrome": "readonly",
         "GM_setValue": "readonly",
         "GM_getValue": "readonly",
+        "content": "readonly",
     },
     "parserOptions": {
         "ecmaVersion": 2018

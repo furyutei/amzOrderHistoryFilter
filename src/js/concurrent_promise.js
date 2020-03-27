@@ -2,7 +2,7 @@
 'use strict';
 
 const
-    version = '1.0.0',
+    version = '1.0.1',
     
     execute = async ( promise_functions, max_concurrent_worker = 10 ) => {
         let concurrent_workers = Array( max_concurrent_worker ).fill( null ),
@@ -111,4 +111,4 @@ Object.assign( exports, {
     debug_mode : false,
 } );
 
-} )( ( typeof exports != 'undefined' ) ? exports : this[ 'concurrent_promise' ] = {} );
+} )( ( typeof exports != 'undefined' ) ? exports : ( ( typeof window != 'undefined' ) ? window : this )[ 'concurrent_promise' ] = {} );

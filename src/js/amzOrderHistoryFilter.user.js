@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name            amzOrderHistoryFilter
+// @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
 // @version         0.1.0.20
@@ -12,7 +13,13 @@
 // @require         https://greasyfork.org/scripts/398566-concurrent-promise/code/concurrent_promise.js?version=784632
 // @grant           GM_setValue
 // @grant           GM_getValue
-// @description     アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。
+// @description     You will be able to view your Amazon (amazon.co.jp) order history by month, and view and print receipts by month or year at a time.
+// @description:ja  アマゾン(amazon.co.jp)の注文履歴を月別表示したり、月別もしくは通年の領収書をまとめて表示・印刷したりできるようになります。
+// @license         MIT
+// @compatible      chrome
+// @compatible      firefox
+// @supportURL      https://github.com/furyutei/amzOrderHistoryFilter/issues
+// @contributionURL https://memo.furyutei.work/about#%E6%B0%97%E3%81%AB%E5%85%A5%E3%81%A3%E3%81%9F%E5%BD%B9%E3%81%AB%E7%AB%8B%E3%81%A3%E3%81%9F%E3%81%AE%E3%81%8A%E6%B0%97%E6%8C%81%E3%81%A1%E3%81%AF%E3%82%AE%E3%83%95%E3%83%88%E5%88%B8%E3%81%A7
 // ==/UserScript==
 
 /*
@@ -120,8 +127,8 @@ OPTIONS.SELECT_DESTINATION_LABEL_TEXT = 'お届け先';
 OPTIONS.SELECT_DESTINATION_ALL_TEXT = '全て';
 OPTIONS.SELECT_DESTINATION_NON_TEXT = '宛先無し'; // TODO: 宛先無しのときに適切なキーがわからないため保留（住所の氏名欄は割と何でも受け付けてしまうため、被らないのが思いつかない）
 OPTIONS.PRINT_RECEIPT_BUTTON_TEXT = '領収書印刷用画面';
-OPTIONS.LOGIN_REQUIRED_MESSAGE = 'サーバー側よりログインが要求されましたので、取得を中止します。';
-OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE = '応答がないままタイムアウトしました。領収書の取得を最初からやり直します。';
+OPTIONS.LOGIN_REQUIRED_MESSAGE = 'サーバーよりログインを要求されたため、取得を中止しました。リロードしますか？';
+OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE = '応答がないままタイムアウトしたものがありました。領収書の取得を最初からやり直しますか？';
 OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT = '注文履歴CSV(参考用)ダウンロード';
 OPTIONS.REFUND_CSV_DOWNLOAD_BUTTON_TEXT = '返金情報CSV(参考用)ダウンロード';
 OPTIONS.CHANGE_ADDRESSEE_BUTTON_TEXT = '宛名変更';
@@ -277,8 +284,13 @@ function get_absolute_url( path, base_url ) {
 } // end of get_absolute_url()
 
 
-var open_child_window = ( function () {
+var {
+    open_child_window,
+    get_child_window_iframe,
+    remove_child_window_iframe,
+} = ( () => {
     var child_window_counter = 0,
+        
         jq_iframe_template = $( '<iframe/>' ).css( {
             'width' : '0',
             'height' : '0',
@@ -287,72 +299,95 @@ var open_child_window = ( function () {
             'top' : '0',
             'left' : '0',
             'pointerEvents' : 'none'
-        } );
-    
-    if ( DEBUG ) {
-        jq_iframe_template.css( {
+        } ).css( DEBUG ? {
             'width' : '500px',
             'height' : '500px',
             'visibility' : 'visible'
-        } );
-    }
-    
-    return function ( url, options ) {
-        if ( ! options ) {
-            options = {};
-        }
+        } : {} ),
         
-        var child_window = options.existing_window,
-            name = '',
-            open_parameters = ( options.open_parameters ) ? options.open_parameters : {};
+        name_to_iframe_map = {},
         
-        open_parameters.child_window_id = SCRIPT_NAME + '-' + ( new Date().getTime() ) + '-' + ( ++ child_window_counter ); // window.name が被らないように細工
-        
-        try {
-            name = JSON.stringify( open_parameters );
-        }
-        catch ( error ) {
-            log_debug( error );
-        }
-        
-        if ( child_window ) {
-            if ( child_window.name != name ) {
-                child_window.name = name;
+        open_child_window = ( url, options ) => {
+            if ( ! options ) {
+                options = {};
             }
-            if ( child_window.location.href != url ) {
-                child_window.location.href = url;
+            
+            var child_window = options.existing_window,
+                name = '',
+                open_parameters = ( options.open_parameters ) ? options.open_parameters : {};
+            
+            open_parameters.child_window_id = SCRIPT_NAME + '-' + ( new Date().getTime() ) + '-' + ( ++ child_window_counter ); // window.name が被らないように細工
+            
+            try {
+                name = JSON.stringify( open_parameters );
             }
-        }
-        else {
-            if ( options.is_iframe ) {
-                var jq_iframe = jq_iframe_template.clone();
-                
-                $( document.documentElement ).append( jq_iframe );
-                
-                child_window = jq_iframe[ 0 ].contentWindow;
-                
-                try {
+            catch ( error ) {
+                log_debug( error );
+            }
+            
+            var result_info = options.result_info = {
+                    name : name,
+                };
+            
+            if ( child_window ) {
+                if ( child_window.name != name ) {
                     child_window.name = name;
-                    child_window.location.href = url;
                 }
-                catch ( error ) {
-                    log_error( 'set failure', error );
-                    
-                    // TODO: MS-Edge 拡張機能だと、name が設定できないことがある
-                    jq_iframe.attr( {
-                        'name' : name,
-                        'src' : url
-                    } );
+                if ( child_window.location.href != url ) {
+                    child_window.location.href = url;
                 }
             }
             else {
-                child_window = window.open( url, name );
+                if ( options.is_iframe ) {
+                    var jq_iframe = jq_iframe_template.clone();
+                    
+                    $( document.documentElement ).append( jq_iframe );
+                    
+                    child_window = jq_iframe[ 0 ].contentWindow;
+                    
+                    try {
+                        child_window.name = name;
+                        child_window.location.href = url;
+                    }
+                    catch ( error ) {
+                        log_error( 'set failure', error );
+                        
+                        // TODO: MS-Edge 拡張機能だと、name が設定できないことがある
+                        jq_iframe.attr( {
+                            'name' : name,
+                            'src' : url
+                        } );
+                    }
+                    
+                    result_info.iframe = name_to_iframe_map[ name ] = jq_iframe[ 0 ];
+                }
+                else {
+                    child_window = window.open( url, name );
+                }
             }
-        }
+            
+            result_info.child_window = child_window;
+            
+            return child_window;
+        }, // end of open_child_window()
         
-        return child_window;
+        get_child_window_iframe = ( child_window ) => name_to_iframe_map[ child_window.name ],
+        // TODO: child_window.name にアクセスした際、Uncaught TypeError: no access エラーになるケース有り
+        
+        remove_child_window_iframe = ( child_window ) => {
+            var target_iframe = get_child_window_iframe( child_window );
+            
+            if ( target_iframe ) {
+                target_iframe.remove();
+            }
+        };
+       
+    return {
+        open_child_window,
+        get_child_window_iframe,
+        remove_child_window_iframe,
     };
-} )(); // end of open_child_window()
+} )();
 
 
 var get_jq_html_fragment = ( function () {
@@ -418,15 +453,24 @@ function wait_for_rendering( callback, options ) {
         options = {};
     }
     
+    log_debug( options.is_digital ? '[DIGITAL]' : '[NON-DIGITAL]', '*** wait_for_rendering(): begin', location.href );
+    
     var min_wait_ms = ( options.min_wait_ms ) ? options.min_wait_ms : 3000,
-        max_wait_ms = ( options.max_wait_ms ) ? options.max_wait_ms : 30000,
+        max_wait_ms = ( options.max_wait_ms ) ? options.max_wait_ms : 60000,
         target_element = ( options.target_element ) ? options.target_element : document.body,
+        
+        jq_payment_breakdown_container = $( '#docs-order-summary-payment-breakdown-container' ),
         
         finish = function () {
             var is_timeover = false;
             
+            if ( watch_timer_id ) {
+                clearTimeout( watch_timer_id );
+                watch_timer_id = null;
+            }
+            
             if ( timeover_timer_id ) {
-                var jq_payment_breakdown_container = $( '#docs-order-summary-payment-breakdown-container' );
+                //var jq_payment_breakdown_container = $( '#docs-order-summary-payment-breakdown-container' );
                 
                 if ( 0 < jq_payment_breakdown_container.length ) {
                     // デジタルの領収書の場合、この部分を書き換えている→3秒待っても書き換え完了しない場合があるため、チェックしておく
@@ -435,12 +479,11 @@ function wait_for_rendering( callback, options ) {
                         ( 0 < jq_payment_breakdown_container.find( '.a-popover-loading' ).length ) ||
                         ( jq_payment_breakdown_container.find( '.a-row .a-column' ).length <= 0 )
                     ) {
-                        log_debug( '** payment information not found => retry' );
+                        log_debug( options.is_digital ? '[DIGITAL]' : '[NON-DIGITAL]', '** payment information not found => retry' );
                         watch_timer_id = setTimeout( finish, min_wait_ms );
                         return;
                     }
                 }
-                watch_timer_id = null;
                 
                 clearTimeout( timeover_timer_id );
                 timeover_timer_id = null;
@@ -468,23 +511,34 @@ function wait_for_rendering( callback, options ) {
                     html : jq_target.html(),
                     is_timeover : is_timeover
                 } );
+                log_debug( options.is_digital ? '[DIGITAL]' : '[NON-DIGITAL]', '*** wait_for_rendering(): end', location.href );
             }
         }, // end of finish()
         
         timeover = function () {
-            log_error( 'wait_for_rendering(): timeover', location.href, options );
+            log_error( options.is_digital ? '[DIGITAL]' : '[NON-DIGITAL]', '*** wait_for_rendering(): timeover', location.href, options );
             
             timeover_timer_id = null;
-            
-            if ( watch_timer_id ) {
-                clearTimeout( watch_timer_id );
-                watch_timer_id = null;
-            }
             
             finish();
         }, // end of timeover()
         
+        last_payment_breakdown_html = '',
+        
         observer = new MutationObserver( function ( records ) {
+            log_debug( options.is_digital ? '[DIGITAL]' : '[NON-DIGITAL]', 'records changed', location.href );
+            
+            if ( 0 < jq_payment_breakdown_container.length ) {
+                var payment_breakdown_html = jq_payment_breakdown_container.html();
+                
+                if ( last_payment_breakdown_html != payment_breakdown_html ) {
+                    log_debug( 'payment_breakdown_html changed:', payment_breakdown_html );
+                    last_payment_breakdown_html = payment_breakdown_html;
+                    finish();
+                    return;
+                }
+            }
+            
             if ( watch_timer_id ) {
                 clearTimeout( watch_timer_id );
             }
@@ -502,8 +556,20 @@ function wait_for_rendering( callback, options ) {
         watch_timer_id = setTimeout( finish, min_wait_ms ),
         timeover_timer_id = setTimeout( timeover, max_wait_ms );
     
-    observer.observe( target_element, { childList : true, subtree : true } );
+    //observer.observe( target_element, { childList : true, subtree : true } );
+    observer.observe( ( 0 < jq_payment_breakdown_container.length ) ? jq_payment_breakdown_container[ 0 ] : target_element, { childList : true, subtree : true } );
+    
+    if ( jq_payment_breakdown_container.length <= 0 ) {
+        // 2020/03/27現在、'#docs-order-summary-payment-breakdown-container' (ViewPaymentPlanSummary WIDGET)がない場合には後から要素が追加されることはなさそう（AD等は除く）
+        finish();
+    }
 } // end of wait_for_rendering()
+
+
+var get_error_html = ( error_message ) => {
+    return '<html><head><title>#ERROR#</title></head><body><h3 style="color:red; font-weight:bolder;">#ERROR#</h3></body></html>'.replace( /#ERROR#/g, $( '<div/>' ).text( error_message ).html() );
+}; // end of get_error_html()
+
 
 // }
 
@@ -511,7 +577,7 @@ function wait_for_rendering( callback, options ) {
 // ■ オブジェクトテンプレート {
 var TemplateLoadingDialog = {
     //loading_icon_url : 'https://images-na.ssl-images-amazon.com/images/G/01/payments-portal/r1/loading-4x._CB338200758_.gif',
-    loading_icon_svg : '<svg version="1.1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="none" r="10" stroke-width="4" style="stroke: currentColor; opacity: 0.4;"></circle><path d="M 12,2 a 10 10 -90 0 1 9,5" fill="none" stroke="currentColor" stroke-width="4" />',
+    loading_icon_svg : '<svg version="1.1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="none" r="10" stroke-width="4" style="stroke: currentColor; opacity: 0.4;"></circle><path d="M 12,2 a 10 10 -90 0 1 9,5.6" fill="none" stroke="currentColor" stroke-width="4" />',
     
     init : function ( options ) {
         if ( ! options ) {
@@ -1830,10 +1896,11 @@ var TemplateOrderHistoryFilter = {
                         } );
                     } );
                 } );
-            };
+            },
+            
+            promise_functions = url_list.map( ( url ) => _fetch_url.bind( self, url ) );
         
-        
-        window.concurrent_promise.execute( url_list.map( ( url ) => _fetch_url.bind( null, url ) ), max_concurrent_number )
+        window.concurrent_promise.execute( promise_functions, max_concurrent_number )
         .then( ( result_info ) => {
             var fetch_result_list = result_info.success_list.map( worker => worker.result ),
                 fetch_failure_list = result_info.failure_list.map( worker => worker.result );
@@ -2016,7 +2083,7 @@ var TemplateOrderHistoryFilter = {
 
 
 var TemplateReceiptOutputPage = {
-    timeout_ms : 60000,
+    timeout_ms : 180000,
     limit_parallel_request_number : 10,
     
     jq_header_template : $( '<h2 class="receipt noprint"><a/></h2>' ),
@@ -2030,8 +2097,8 @@ var TemplateReceiptOutputPage = {
     init : function ( open_parameters ) {
         var self = this,
             
-            remaining_request_order_urls = self.remaining_request_order_urls = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ),
-            max_receipt_number = self.max_receipt_number = remaining_request_order_urls.length,
+            request_order_urls = self.request_order_urls = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ),
+            max_receipt_number = self.max_receipt_number = request_order_urls.length,
             
             loading_dialog = self.loading_dialog = object_extender( TemplateLoadingDialog ).init( {
                 counter_required : true,
@@ -2042,7 +2109,47 @@ var TemplateReceiptOutputPage = {
             
             url_to_page_info = self.url_to_page_info = {},
             
-            addressee = get_value( SCRIPT_NAME + '-addressee' );
+            addressee = get_value( SCRIPT_NAME + '-addressee' ),
+            
+            process_controller = self.process_controller = new class {
+                constructor() {
+                    this.reset();
+                    this._AbortException = class extends DOMException {
+                        constructor( message = 'The user aborted a request.', ...params ) {
+                            super( message, 'AbortError', ...params );
+                        }
+                    };
+                }
+                
+                get is_canceled() {
+                    return this._is_canceled;
+                }
+                
+                get abort_signal() {
+                    return this._abort_signal;
+                }
+                
+                reset() {
+                    this._abort_controller = new AbortController();
+                    this._abort_signal = this._abort_controller.signal;
+                    this._is_canceled = false;
+                }
+                
+                cancel() {
+                    this._is_canceled = true;
+                    this._abort_controller.abort();
+                }
+                
+                abort_exception( message ) {
+                    return new this._AbortException( message );
+                }
+                
+                abort_if_canceled( message ) {
+                    if ( this.is_canceled ) {
+                        throw this.abort_exception( message );
+                    }
+                }
+            }();
         
         if ( OPTIONS.ADDRESSEE_CHANGEABLE ) {
             self.addressee = ( addressee ) ? addressee : '';
@@ -2050,13 +2157,9 @@ var TemplateReceiptOutputPage = {
         
         self.open_parameters = open_parameters;
         self.result_waiting_counter = 1 + max_receipt_number;
-        self.current_receipt_number = 0;
-        self.request_counter = 0;
         
-        self.is_reloading = false;
-        
-        self.timeout_timer_id = null;
-        self.reset_timeout_timer();
+        self.is_timeout = false;
+        self.signin_request = false;
         
         self.jq_csv_download_link = null;
         self.jq_refund_csv_download_link = null;
@@ -2080,39 +2183,55 @@ var TemplateReceiptOutputPage = {
             self.on_receive_message( event );
         } );
         
-        for ( self.request_counter = 0; self.request_counter < self.limit_parallel_request_number; self.request_counter ++ ) {
-            var request_order_url = remaining_request_order_urls.shift();
+        var promise_functions = [
+                // 現在のページの描画待ち
+                () => {
+                    return new Promise( ( resolve, reject ) => {
+                        wait_for_rendering( function ( result ) {
+                            self.on_rendering_complete( result.html );
+                            
+                            resolve( 'The first page has been rendered.' );
+                        }, {
+                            is_digital : open_parameters.is_digital,
+                        } );
+                    } );
+                }
+            ].concat(
+                // 領収書を IFRAME 経由で取得
+                request_order_urls.map( ( request_order_url, index ) => self.call_by_iframe.bind( self, request_order_url, 1 + index ) )
+            );
+        
+        window.concurrent_promise.execute( promise_functions, self.limit_parallel_request_number )
+        .then( ( result_info ) => {
+            log_debug( 'TemplateReceiptOutputPage#init()', result_info );
             
-            if ( ! request_order_url ) {
-                break;
+            if ( self.is_timeout || self.signin_request ) {
+                self.loading_dialog.hide();
+                
+                if ( confirm( self.is_timeout ? OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE : OPTIONS.LOGIN_REQUIRED_MESSAGE ) ) {
+                    //window.location.reload( true );
+                    var replace_url = open_parameters.first_order_url;
+                    
+                    log_info( 'Transitions to URL:', replace_url );
+                    window.location.replace( replace_url );
+                    return;
+                }
+                //return;
             }
             
-            self.current_receipt_number ++;
+            self.finish();
+        } )
+        .catch( ( result_info ) => {
+            // ※ここには入らないはず
+            log_error( '*** [BUG] ***\n', result_info );
             
-            self.call_by_iframe( request_order_url, self.current_receipt_number );
-        }
-        
-        wait_for_rendering( function ( result ) {
-            self.on_rendering_complete( result.html );
+            self.loading_dialog.hide();
+            
+            alert( 'Sorry, there was an unexpected bug.' );
         } );
         
         return self;
     }, // end of init()
-    
-    
-    reset_timeout_timer : function () {
-        var self = this;
-        
-        if ( self.timeout_timer_id ) {
-            clearTimeout( self.timeout_timer_id );
-        }
-        
-        self.timeout_timer_id = setTimeout( function () {
-            self.on_timeout();
-        }, self.timeout_ms );
-        
-        return self;
-    }, // end of reset_timeout_timer()
     
     
     create_jq_header : function ( receipt_number, receipt_url ) {
@@ -2176,25 +2295,100 @@ var TemplateReceiptOutputPage = {
     }, // end of create_jq_receipt_body()
     
     
-    call_by_iframe : function ( request_order_url, receipt_number, existing_window ) {
-        var self = this,
-            child_window = open_child_window( request_order_url, {
-                is_iframe : true,
-                existing_window : existing_window,
-                open_parameters : {
-                    first_order_url : self.open_parameters.first_order_url,
-                    request_order_url : request_order_url,
-                    is_digital : self.open_parameters.is_digital
-                }
+    call_by_iframe : function ( request_order_url, receipt_number ) {
+        var self = this;
+        
+        return new Promise( ( resolve, reject ) => {
+            var process_controller = self.process_controller,
+                abort_signal = process_controller.abort_signal,
+                
+                page_info = self.url_to_page_info[ request_order_url ] = {
+                    receipt_number : receipt_number,
+                    order_url : request_order_url,
+                    resolve : resolve,
+                    reject : reject,
+                },
+                
+                call_reject = ( error_info, error_message ) => {
+                    page_info.error_info = error_info;
+                    
+                    var html = get_error_html( error_message );
+                    
+                    page_info.html = html;
+                    page_info.jq_receipt_body = self.create_jq_receipt_body( html, page_info.receipt_number, request_order_url );
+                    page_info.order_parameters = null;
+                    
+                    self.loading_dialog.counter_increment();
+                    self.result_waiting_counter --;
+                    
+                    reject( page_info );
+                };
+            
+            if ( process_controller.is_canceled ) {
+                call_reject(
+                    process_controller.abort_exception(),
+                    'Request has been canceld.'
+                );
+                return;
+            }
+            
+            var child_window_options = {
+                    is_iframe : true,
+                    open_parameters : {
+                        first_order_url : self.open_parameters.first_order_url,
+                        request_order_url : request_order_url,
+                        is_digital : self.open_parameters.is_digital
+                    }
+                },
+                
+                child_window = open_child_window( request_order_url, child_window_options ),
+                
+                iframe = child_window_options.result_info.iframe,
+                
+                timeout_timer_id = setTimeout( () => {
+                    self.is_timeout = true;
+                    timeout_timer_id = null;
+                    remove_event_listener();
+                    
+                    //process_controller.cancel();
+                    
+                    call_reject(
+                        new DOMException( 'Receipt read timeout', 'TimeoutError' ),
+                        'Receipt read timeout.'
+                    );
+                }, self.timeout_ms ),
+                
+                remove_event_listener = () => {
+                    if ( timeout_timer_id ) {
+                        clearTimeout( timeout_timer_id );
+                        timeout_timer_id = null;
+                    }
+                    abort_signal.removeEventListener( 'abort', on_abort );
+                    
+                    //remove_child_window_iframe( child_window );
+                    // TODO: child_window.name にアクセスした際、Uncaught TypeError: no access エラーになるケース有り
+                    iframe.remove();
+                    
+                    delete page_info.child_window;
+                    delete page_info.remove_event_listener;
+                },
+                
+                on_abort = ( event ) => {
+                    remove_event_listener();
+                    
+                    call_reject(
+                        process_controller.abort_exception(),
+                        'Request has been canceld.'
+                    );
+                };
+            
+            Object.assign( page_info, {
+                child_window : child_window,
+                remove_event_listener : remove_event_listener,
             } );
-        
-        self.url_to_page_info[ request_order_url ] = {
-            receipt_number : receipt_number,
-            order_url : request_order_url,
-            child_window : child_window
-        };
-        
-        return self;
+            
+            abort_signal.addEventListener( 'abort', on_abort );
+        } );
     }, // end of call_by_iframe()
     
     
@@ -2204,8 +2398,6 @@ var TemplateReceiptOutputPage = {
             jq_body = self.jq_body;
         
         log_debug( '*** on_rendering_complete: result_waiting_counter=', self.result_waiting_counter );
-        
-        self.reset_timeout_timer();
         
         self.result_waiting_counter --;
         
@@ -2219,10 +2411,6 @@ var TemplateReceiptOutputPage = {
         
         self.insert_jq_addressee( jq_body );
         
-        if ( self.result_waiting_counter <= 0 ) {
-            self.finish();
-        }
-        
         return self;
     }, // end of on_rendering_complete()
     
@@ -2233,8 +2421,6 @@ var TemplateReceiptOutputPage = {
             url_to_page_info = self.url_to_page_info;
         
         log_debug( '*** on_receive_message: result_waiting_counter=', self.result_waiting_counter, 'event=', event );
-        
-        self.reset_timeout_timer();
         
         if ( event.origin != get_origin_url() ) {
             log_error( 'origin error:', event.origin );
@@ -2250,63 +2436,58 @@ var TemplateReceiptOutputPage = {
             return;
         }
         
-        if ( event.data.error ) {
-            log_error( event.data.error_message );
-            
-            if ( ( ! self.is_reloading ) && event.data.signin_request ) {
-                log_error( 'sign-in required' );
-                
-                self.loading_dialog.hide();
-                
-                self.is_reloading = true;
-                
-                if ( confirm( OPTIONS.LOGIN_REQUIRED_MESSAGE ) ) {
-                    window.location.reload( true );
-                    return;
-                }
-            }
+        if ( self.process_controller.is_canceled ) {
+            return;
         }
+        
+        if ( typeof page_info.remove_event_listener != 'function' ) {
+            log_info( 'pageinfo.remove_event_listener() not found (it has probably already been completed): page_info=', page_info );
+            return;
+        }
+        
+        page_info.remove_event_listener();
         
         page_info.html = event.data.html;
         page_info.jq_receipt_body = self.create_jq_receipt_body( event.data.html, page_info.receipt_number, request_order_url );
-        page_info.order_parameters = self.get_order_parameters( page_info.jq_receipt_body, event.data.order_detail_page_info );
+        
+        if ( event.data.error ) {
+            page_info.order_parameters = null;
+        }
+        else {
+            try {
+                page_info.order_parameters = self.get_order_parameters( page_info.jq_receipt_body, event.data.order_detail_page_info );
+            }
+            catch ( error ) {
+                log_error( 'on_receive_message():', error, page_info.jq_receipt_body, event.data.order_detail_page_info );
+                page_info.order_parameters = null;
+            }
+        }
         
         self.loading_dialog.counter_increment();
         self.result_waiting_counter --;
         
-        if ( self.result_waiting_counter <= 0 ) {
-            self.finish();
+        if ( event.data.error ) {
+            log_error( event.data.error_message );
+            
+            if ( event.data.signin_request ) {
+                log_error( 'sign-in required' );
+                
+                page_info.error_info = new DOMException( event.data.error_message, 'NotAllowedError' );
+                
+                self.signin_request = true;
+                self.process_controller.cancel();
+            }
+            else {
+                page_info.error_info = new DOMException( event.data.error_message, 'UnknownError' );
+            }
+            page_info.reject( page_info );
         }
-        
-        request_order_url = self.remaining_request_order_urls.shift();
-        
-        if ( ! request_order_url ) {
-            return;
+        else {
+            page_info.resolve( page_info );
         }
-        
-        self.current_receipt_number ++;
-        
-        self.call_by_iframe( request_order_url, self.current_receipt_number, page_info.child_window );
         
         return self;
     }, // end of on_receive_message()
-    
-    
-    on_timeout : function () {
-        var self = this;
-        
-        log_error( 'receipt read timeout' );
-        
-        self.loading_dialog.hide();
-        
-        if ( ! self.is_reloading ) {
-            self.is_reloading = true;
-            
-            if ( confirm( OPTIONS.RECEIPT_READ_TIMEOUT_MESSAGE ) ) {
-                window.location.reload( true );
-            }
-        }
-    }, // end of on_timeout()
     
     
     finish :  function () {
@@ -2325,11 +2506,6 @@ var TemplateReceiptOutputPage = {
             
             url_to_page_info = self.url_to_page_info,
             refund_info_container_list = self.refund_info_container_list = [];
-        
-        if ( self.timeout_timer_id ) {
-            clearTimeout( self.timeout_timer_id ) ;
-            self.timeout_timer_id = null;
-        }
         
         [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ).forEach( function ( order_url, index ) {
             var page_info = url_to_page_info[ order_url ];
@@ -3210,6 +3386,10 @@ var TemplateReceiptOutputPage = {
             order_url_list.forEach( function ( order_url ) {
                 var order_parameters = url_to_page_info[ order_url ].order_parameters;
                 
+                if ( ! order_parameters ) {
+                    return;
+                }
+                
                 order_parameters.item_list.forEach( function ( item, item_index ) {
                     csv_lines.push( self.create_csv_line( [
                         order_parameters.order_date, // 注文日
@@ -3273,8 +3453,13 @@ var TemplateReceiptOutputPage = {
         }
         else {
             order_url_list.forEach( function ( order_url ) {
-                var order_parameters = url_to_page_info[ order_url ].order_parameters,
-                    card_billing_amount = 0,
+                var order_parameters = url_to_page_info[ order_url ].order_parameters;
+                
+                if ( ! order_parameters ) {
+                    return;
+                }
+                
+                var card_billing_amount = 0,
                     card_type = '',
                     card_type_map = {},
                     current_card_info_index = 0,
@@ -3670,9 +3855,9 @@ function init_order_page_in_iframe( open_parameters ) {
     if ( is_signin_page() ) {
         window.parent.postMessage( {
             request_order_url : open_parameters.request_order_url,
-            html : '<html><head><title>Please Sign-in</title></head><body><h3 style="color:red; font-weight:bolder;">Please Sign-in !!</h3></body></html>',
+            html : get_error_html( 'Please Sign-in !!' ),
             error : true,
-            error_message : 'sign-in requested',
+            error_message : 'Sign-in requested',
             signin_request : true
         }, get_origin_url() );
         return;
@@ -3681,9 +3866,9 @@ function init_order_page_in_iframe( open_parameters ) {
     if ( ! is_receipt_page() ) {
         window.parent.postMessage( {
             request_order_url : open_parameters.request_order_url,
-            html : '<html><head><title>Unknown Error</title></head><body><h3 style="color:red; font-weight:bolder;">Unknow Errror !!</h3></body></html>',
+            html : get_error_html( 'Unknown Error.' ),
             error : true,
-            error_message : 'unknown error'
+            error_message : 'Unknown Error'
         }, get_origin_url() );
         return;
     }
@@ -3807,7 +3992,9 @@ function init_order_page_in_iframe( open_parameters ) {
             }, get_origin_url() ); // ※第二引数は targetOrigin（window.parentの生成元）→同一ドメインのため、簡略化
         }; // end of finish()
     
-    wait_for_rendering( on_rendering_complete );
+    wait_for_rendering( on_rendering_complete, {
+        is_digital : open_parameters.is_digital,
+    } );
     
     $.ajax( {
         url : order_detail_url,
