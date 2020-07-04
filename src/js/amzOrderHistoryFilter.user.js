@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.20
+// @version         0.1.0.21
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -3734,7 +3734,7 @@ var TemplateReceiptOutputPage = {
         source_csv_columns.forEach( function ( source_csv_column ) {
             source_csv_column = ( '' + source_csv_column ).trim();
             
-            if ( /^\d+$/.test( source_csv_column ) ) {
+            if ( /^[\-+]?\d+\.?\d*(?:E[\-+]?\d+)?$/.test( source_csv_column ) ) {
                 output_csv_columns.push( source_csv_column );
             }
             else {
