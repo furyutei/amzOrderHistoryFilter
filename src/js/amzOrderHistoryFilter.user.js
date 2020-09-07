@@ -2586,9 +2586,7 @@ var TemplateReceiptOutputPage = {
             
             jq_order_summary = jq_receipt_body.find( '.orderSummary:first' ),
             jq_order_summary_header = jq_order_summary.find( 'table:eq(0)' ),
-            jq_order_summary_content = jq_order_summary.find( 'table.sample' ),
-            jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( '#docs-order-summary-payment-breakdown-container' ),
-            jq_payment_summary_price_infos = jq_payment_summary.find( '.pmts-summary-preview-single-item-amount' );
+            jq_order_summary_content = jq_order_summary.find( 'table.sample' );
         
         /*
         //order_date = get_formatted_date_string( get_child_text_from_jq_element( jq_order_summary_header.find( 'td:has(b:contains("注文日")):first' ) ) );
@@ -2629,13 +2627,38 @@ var TemplateReceiptOutputPage = {
         order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:last td[colspan][align="right"]:contains("商品小計")' ) ) );
         order_total_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_header.find( 'b:contains("注文の合計")' ) ) );
         
-        if ( 0 < jq_payment_summary.length  ) {
-            // 新しい(2014/04頃以降の)ものは、<!-- BEGIN ViewPaymentPlanSummary WIDGET --> というマークが入っている
-            // ※ Amazonアプリストアなど、一部旧式のままのものもある模様
+        var jq_payment_summary,
+            jq_payment_summary_price_infos;
+        
+        jq_payment_summary = jq_receipt_body.find( '[data-pmts-component-id][class*="-root-"]' );
+        
+        if ( 0 < jq_payment_summary.length ) {
+            // 2020/09頃からフォーマットが変わった模様
+            // - 2020/04頃以降の、これまで入っていた<!-- BEGIN ViewPaymentPlanSummary WIDGET -->ものもこちらに置き換わっている？
+            // - ポイントで購入したものの明細が無くなっている？
+            var card_type_list = [];
             
-            order_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_summary.find( '.pmts-summary-preview-single-item-total .a-color-price' ) ) );
+            jq_payment_summary.find( '.pmts-payment-instrument-billing-address .pmts-payments-instrument-details ul li.pmts-payments-instrument-detail-box-paystationpaymentmethod' ).each( function () {
+                var jq_li = $( this ),
+                    jq_card_img = jq_li.find( '.pmts-payment-credit-card-instrument-logo' ),
+                    text = jq_li.text().trim();
+                
+                if ( 0 < jq_card_img.length ) {
+                    card_type_list.push( jq_card_img.attr( 'alt' ) + ' ' + text );
+                }
+                else if ( /Amazon\s*ポイント/.test( text ) ) {
+                    card_type_list.push( text );
+                }
+            } );
             
-            jq_payment_summary_price_infos.each( function () {
+            card_info.card_type = card_type_list.join( '\n' );
+            card_info.card_billing_amount = get_price_number( jq_payment_summary.find( '.pmts-amount-breakdown .pmts-grand-order-total .a-span-last' ).text() );
+            order_billing_destination = jq_payment_summary.find( '.pmts-billing-address-details ul li.pmts-billing-address-fullname' ).text().trim();
+            
+            //order_billing_amount = get_price_number( jq_payment_summary.find( '.pmts-amount-breakdown .pmts-amount-breakdown-sub-totals .a-span-last' ).text() );
+            order_billing_amount = card_info.card_billing_amount;
+            
+            jq_payment_summary.find( '.pmts-amount-breakdown .pmts-amount-breakdown-sub-totals' ).each( function () {
                 var jq_price_info = $( this ),
                     jq_price_info_columns = jq_price_info.find( 'div.a-column' ),
                     jq_price_info_name = jq_price_info_columns.eq( 0 ),
@@ -2643,13 +2666,9 @@ var TemplateReceiptOutputPage = {
                     name = jq_price_info_name.text().trim().replace( /(?:の金額)?[：:]+\s*$/g, '' ),
                     price = get_price_number( jq_price_info_price.text() );
                 
-                if ( price === '' ) {
-                    return;
-                }
+                if ( ( ! name ) || ( price === '' ) ) return;
                 
-                if ( /(?:小|合|総|)計/.test( name ) ) {
-                    return;
-                }
+                if ( /(?:小|合|総|)計/.test( name ) ) return;
                 
                 other_price_info_list.push( {
                     name : name,
@@ -2657,129 +2676,164 @@ var TemplateReceiptOutputPage = {
                 } );
             } );
             
-            var jq_card_type = jq_payment_summary.find( 'table.pmts_payment_method_table .pmts_view_payment_plan_payment_method .pmts-aui-account-number-display:last .pmts-inst-tail' );
-            
-            card_info.card_type = jq_card_type.text().trim();
-            card_info.card_billing_amount = get_price_number( get_child_text_from_jq_element( jq_card_type.parents( 'tr:first' ).find( '.pmts_view_payment_plan_payment_method_coverage_amount' ) ) );
-            order_billing_destination = get_child_text_from_jq_element( jq_payment_summary.find( '.pmts_billing_address_block .pmts-account-holder-name' ) );
+            log_debug( 'order_billing_amount:', order_billing_amount,  'card_info.card_billing_amount:', card_info.card_billing_amount, 'card_info.card_type:', card_info.card_type, 'order_billing_destination:', order_billing_destination );
         }
         else {
-            // 古い領収書の場合、支払い情報欄のフォーマットが異なる(2014/04頃を境に変化)
+            jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( '#docs-order-summary-payment-breakdown-container' );
             
-            jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( 'table tr' );
-            
-            var is_card_type = false,
-                is_billing_destination = false,
-                card_type_text = '',
-                billing_destination_text = '',
-                br_counter = 0;
-            
-            jq_payment_summary.find( 'td:eq(0)' ).contents().each( function () {
-                var text_value = '',
-                    node_type = this.nodeType;
+            if ( 0 < jq_payment_summary.length  ) {
+                // 新しい(2014/04頃以降の)ものは、<!-- BEGIN ViewPaymentPlanSummary WIDGET --> というマークが入っている
+                // ※ Amazonアプリストアなど、一部旧式のままのものもある模様
                 
-                if ( node_type == 1 ) {
-                    switch ( this.tagName ) {
-                        case 'B' :
-                            text_value = this.textContent;
-                            
-                            if ( /支払い?方法/.test( text_value ) ) {
-                                is_card_type = true;
-                                is_billing_destination = false;
-                                br_counter = 0;
-                            }
-                            else if ( /請求先/.test( text_value ) ) {
-                                is_card_type = false;
-                                is_billing_destination = true;
-                                br_counter = 0;
-                            }
-                            break;
-                            
-                        case 'BR' :
-                            br_counter ++;
-                            break;
-                    }
-                    return;
-                }
+                order_billing_amount = get_price_number( get_child_text_from_jq_element( jq_payment_summary.find( '.pmts-summary-preview-single-item-total .a-color-price' ) ) );
                 
-                if ( node_type != 3 ) {
-                    return;
-                }
+                jq_payment_summary_price_infos = jq_payment_summary.find( '.pmts-summary-preview-single-item-amount' );
                 
-                if ( br_counter == 1 ) {
-                    text_value = this.nodeValue.trim();
+                jq_payment_summary_price_infos.each( function () {
+                    var jq_price_info = $( this ),
+                        jq_price_info_columns = jq_price_info.find( 'div.a-column' ),
+                        jq_price_info_name = jq_price_info_columns.eq( 0 ),
+                        jq_price_info_price = jq_price_info_columns.eq( 1 ),
+                        name = jq_price_info_name.text().trim().replace( /(?:の金額)?[：:]+\s*$/g, '' ),
+                        price = get_price_number( jq_price_info_price.text() );
                     
-                    if ( is_card_type ) {
-                        card_type_text += text_value;
+                    if ( price === '' ) {
+                        return;
                     }
-                    else if ( is_billing_destination ) {
-                        billing_destination_text += text_value;
+                    
+                    if ( /(?:小|合|総|)計/.test( name ) ) {
+                        return;
                     }
-                }
-            } );
-            
-            card_info.card_type = card_type_text.trim();
-            order_billing_destination = billing_destination_text.trim();
-            
-            var jq_price_info_container = jq_payment_summary.find( 'td[align="right"]' ),
-                price_info_text = '';
-            
-            jq_price_info_container.contents().each( function () {
-                var text_value = '',
-                    node_type = this.nodeType;
+                    
+                    other_price_info_list.push( {
+                        name : name,
+                        price : price
+                    } );
+                } );
                 
-                if ( node_type == 1 ) {
-                    switch ( this.tagName ) {
-                        case 'B' :
-                            text_value = this.textContent;
-                            
-                            if ( /総計/.test( text_value ) ) {
-                                order_billing_amount =  get_price_number( text_value );
-                                return false;
-                            }
-                            break;
-                            
-                        case 'BR' :
-                            var parts = price_info_text.split( /[:：]/ ),
-                                name = '',
-                                price = 0;
-                            
-                            price_info_text = '';
-                            
-                            if ( parts.length < 2 ) {
-                                return;
-                            }
-                            
-                            name = parts[ 0 ].trim();
-                            price = get_price_number( parts[ 1 ] );
-                            
-                            if ( ! price ) {
-                                return;
-                            }
-                            
-                            if ( /(?:小|合|総|)計/.test( name ) ) {
-                                return;
-                            }
-                            
-                            other_price_info_list.push( {
-                                name : name,
-                                price : price
-                            } );
-                            break;
-                    }
-                    return;
-                }
+                var jq_card_type = jq_payment_summary.find( 'table.pmts_payment_method_table .pmts_view_payment_plan_payment_method .pmts-aui-account-number-display:last .pmts-inst-tail' );
                 
-                if ( node_type == 3 ) {
-                    price_info_text += this.nodeValue.trim();
+                card_info.card_type = jq_card_type.text().trim();
+                card_info.card_billing_amount = get_price_number( get_child_text_from_jq_element( jq_card_type.parents( 'tr:first' ).find( '.pmts_view_payment_plan_payment_method_coverage_amount' ) ) );
+                order_billing_destination = get_child_text_from_jq_element( jq_payment_summary.find( '.pmts_billing_address_block .pmts-account-holder-name' ) );
+            }
+            else {
+                // 古い領収書の場合、支払い情報欄のフォーマットが異なる(2014/04頃を境に変化)
+                
+                jq_payment_summary = jq_receipt_body.children( 'table.sample' ).find( 'table tr' );
+                
+                var is_card_type = false,
+                    is_billing_destination = false,
+                    card_type_text = '',
+                    billing_destination_text = '',
+                    br_counter = 0;
+                
+                jq_payment_summary.find( 'td:eq(0)' ).contents().each( function () {
+                    var text_value = '',
+                        node_type = this.nodeType;
+                    
+                    if ( node_type == 1 ) {
+                        switch ( this.tagName ) {
+                            case 'B' :
+                                text_value = this.textContent;
+                                
+                                if ( /支払い?方法/.test( text_value ) ) {
+                                    is_card_type = true;
+                                    is_billing_destination = false;
+                                    br_counter = 0;
+                                }
+                                else if ( /請求先/.test( text_value ) ) {
+                                    is_card_type = false;
+                                    is_billing_destination = true;
+                                    br_counter = 0;
+                                }
+                                break;
+                                
+                            case 'BR' :
+                                br_counter ++;
+                                break;
+                        }
+                        return;
+                    }
+                    
+                    if ( node_type != 3 ) {
+                        return;
+                    }
+                    
+                    if ( br_counter == 1 ) {
+                        text_value = this.nodeValue.trim();
+                        
+                        if ( is_card_type ) {
+                            card_type_text += text_value;
+                        }
+                        else if ( is_billing_destination ) {
+                            billing_destination_text += text_value;
+                        }
+                    }
+                } );
+                
+                card_info.card_type = card_type_text.trim();
+                order_billing_destination = billing_destination_text.trim();
+                
+                var jq_price_info_container = jq_payment_summary.find( 'td[align="right"]' ),
+                    price_info_text = '';
+                
+                jq_price_info_container.contents().each( function () {
+                    var text_value = '',
+                        node_type = this.nodeType;
+                    
+                    if ( node_type == 1 ) {
+                        switch ( this.tagName ) {
+                            case 'B' :
+                                text_value = this.textContent;
+                                
+                                if ( /総計/.test( text_value ) ) {
+                                    order_billing_amount =  get_price_number( text_value );
+                                    return false;
+                                }
+                                break;
+                                
+                            case 'BR' :
+                                var parts = price_info_text.split( /[:：]/ ),
+                                    name = '',
+                                    price = 0;
+                                
+                                price_info_text = '';
+                                
+                                if ( parts.length < 2 ) {
+                                    return;
+                                }
+                                
+                                name = parts[ 0 ].trim();
+                                price = get_price_number( parts[ 1 ] );
+                                
+                                if ( ! price ) {
+                                    return;
+                                }
+                                
+                                if ( /(?:小|合|総|)計/.test( name ) ) {
+                                    return;
+                                }
+                                
+                                other_price_info_list.push( {
+                                    name : name,
+                                    price : price
+                                } );
+                                break;
+                        }
+                        return;
+                    }
+                    
+                    if ( node_type == 3 ) {
+                        price_info_text += this.nodeValue.trim();
+                    }
+                } );
+                
+                if ( order_billing_amount ) {
+                    card_info.card_billing_amount = order_billing_amount;
                 }
-            } );
-            
-            if ( order_billing_amount ) {
-                card_info.card_billing_amount = order_billing_amount;
             }
         }
-        
         order_status = get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:first td[align="center"] font b' ) );
         
         order_url = get_absolute_url( jq_receipt_body.children( 'center:eq(-1)' ).find( 'p > a' ).attr( 'href' ) );
@@ -3889,7 +3943,8 @@ function init_order_page_in_iframe( open_parameters ) {
                     refund_invoice_url : '',
                     refund_list : refund_list
                 },
-                refund_invoice_url = jq_html_fragment.find( 'a.a-link-normal[href*="/invoice/download"]:contains("返金通知書")' ).attr( 'href' );
+                //refund_invoice_url = jq_html_fragment.find( 'a.a-link-normal[href*="/invoice/download"]:contains("返金通知書")' ).attr( 'href' );
+                refund_invoice_url = jq_html_fragment.find( 'a.a-link-normal[href*="/invoice/download"]' ).attr( 'href' );
             
             if ( refund_invoice_url ) {
                 refund_info.refund_invoice_url = get_absolute_url( refund_invoice_url );
