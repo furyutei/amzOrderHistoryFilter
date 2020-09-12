@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.21
+// @version         0.1.0.22
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -813,7 +813,7 @@ var TemplateOrderHistoryFilter = {
         
         self.under_suspension = !! under_suspension;
         
-        var target_period = $( 'select#orderFilter' ).val();
+        var target_period = $( 'select#orderFilter' ).val() || '';
         
         try {
             if ( target_period.match( /^year-(\d{4})$/ ) ) {
