@@ -813,25 +813,26 @@ var TemplateOrderHistoryFilter = {
         
         self.under_suspension = !! under_suspension;
         
-        var target_period = $( 'select#orderFilter' ).val() || '';
+        var order_filter = $( 'select#orderFilter' );
+        
+        if ( order_filter.length <= 0 || order_filter.parents( '#controlsContainer' ).length <= 0 ) {
+            return self;
+        }
+        
+        var target_period = order_filter.val() || '';
         
         try {
             if ( target_period.match( /^year-(\d{4})$/ ) ) {
                 target_period = RegExp.$1;
             }
+            else if ( target_period.match( /^months-(\d+)$/ ) ) {
+                target_period = 'last-' + RegExp.$1 + 'months';
+            }
+            else if ( target_period.match( /^last(\d+)$/ ) ) {
+                target_period = 'last-' + RegExp.$1 + 'days';
+            }
             else {
-                switch ( target_period ) {
-                    case 'last30' :
-                        target_period = 'last-30days';
-                        break;
-                    
-                    case 'months-6' :
-                        target_period = 'last-6months';
-                        break;
-                    
-                    default :
-                        return self;
-                }
+                return self;
             }
         }
         catch ( error ) {
