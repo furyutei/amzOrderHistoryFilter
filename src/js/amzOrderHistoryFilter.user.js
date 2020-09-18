@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.22
+// @version         0.1.0.23
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -391,19 +391,28 @@ var {
 
 
 var get_jq_html_fragment = ( function () {
-    if ( ( ! document.implementation ) || ( typeof document.implementation.createHTMLDocument != 'function' ) ) {
-        return function ( html ) {
-            return $( '<div/>' ).html( html );
-        };
+    if ( typeof DOMParser == 'function' ) {
+        return ( html ) => $( new DOMParser().parseFromString( html, "text/html" ) );
     }
     
-    // 解析段階での余分なネットワークアクセス（画像等の読み込み）抑制
-    var html_document = document.implementation.createHTMLDocument(''),
-        range = html_document.createRange();
-    
     return function ( html ) {
-        return $( range.createContextualFragment( html ) );
+        return $( '<div/>' ).html( html );
     };
+    /*
+    //if ( ( ! document.implementation ) || ( typeof document.implementation.createHTMLDocument != 'function' ) ) {
+    //    return function ( html ) {
+    //        return $( '<div/>' ).html( html );
+    //    };
+    //}
+    //
+    //// 解析段階での余分なネットワークアクセス（画像等の読み込み）抑制
+    //var html_document = document.implementation.createHTMLDocument(''),
+    //    range = html_document.createRange();
+    //
+    //return function ( html ) {
+    //    return $( range.createContextualFragment( html ) );
+    //};
+    */
 } )(); // end of get_jq_html_fragment()
 
 
@@ -1017,7 +1026,8 @@ var TemplateOrderHistoryFilter = {
             jq_operation_continer = jq_filter_control.find( '.operation-container' ).css( {
                 'position' : 'absolute',
                 //'top' : '0',
-                'top' : '-24px',
+                //'top' : '-24px',
+                'top' : '-42px',
                 'right' : '0',
                 'text-align' : 'right'
             } ),
@@ -1034,7 +1044,7 @@ var TemplateOrderHistoryFilter = {
             jq_message = self.jq_message = jq_filter_control.find( '.message' ).css( {
                 'color' : 'red',
                 'min-width' : '50px',
-                'padding' : '4px',
+                'padding' : '4px 0 4px 4px',
                 'font-weight' : 'bolder',
                 'text-align' : 'right'
             } ),
@@ -1545,7 +1555,7 @@ var TemplateOrderHistoryFilter = {
             start_ms = new Date().getTime(),
             last_page_url = $( 'div.pagination-full ul.a-pagination li.a-normal:last a' ).attr( 'href' ),
             error_button = $( '<button/>' ).css( {
-                'margin-left' : '4px',
+                'margin-left' : '8px',
                 'color' : 'red'
             } ),
             download_text = function ( filename, text ) {
@@ -1851,55 +1861,133 @@ var TemplateOrderHistoryFilter = {
             
             max_concurrent_number = 10,
             
+            /*
+            //_fetch_url = ( url ) => {
+            //    return new Promise( ( resolve, reject ) => {
+            //        $.ajax( {
+            //            url : get_absolute_url( url ),
+            //            type : 'GET',
+            //            dataType : 'html',
+            //            headers : { 'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*\/\*;q=0.8" },
+            //            //beforeSend : function( xhr ) {
+            //            //    xhr.setRequestHeader( 'X-Requested-With', { toString : function () { return '';} } );
+            //            //},
+            //            crossDomain : true
+            //            // リクエストヘッダに X-Requested-With : XMLHttpRequest が含まれると、Amazon から HTML ではない形式で返されてしまう
+            //            // → crossDomain を true にして X-Requested-With を送信しないようにする
+            //            // ※参考: 
+            //            //   [jquery - can i remove the X-Requested-With header from ajax requests? - Stack Overflow](https://stackoverflow.com/questions/3372962/can-i-remove-the-x-requested-with-header-from-ajax-requests)
+            //            //   [javascript - jQueryのcrossDomainオプションが効かない - スタック・オーバーフロー](https://ja.stackoverflow.com/questions/5406/jquery%E3%81%AEcrossdomain%E3%82%AA%E3%83%97%E3%82%B7%E3%83%A7%E3%83%B3%E3%81%8C%E5%8A%B9%E3%81%8B%E3%81%AA%E3%81%84)
+            //        } )
+            //        .done( ( html, textStatus, jqXHR ) => {
+            //            resolve( {
+            //                url : url,
+            //                success : true,
+            //                html : html,
+            //                textStatus : textStatus,
+            //                jqXHR : jqXHR
+            //            } );
+            //        } )
+            //        .fail( ( jqXHR, textStatus, errorThrown ) => {
+            //            // TODO: HTML 取得に失敗することがあるらしい(バージョン 0.1.0.12にて発生報告有り)
+            //            // →当該 URL について、エラー確認用出力追加＆とりあえず無視する
+            //            log_error( '[Fetch Failure]\n', url, '\n', jqXHR.status, jqXHR.statusText );
+            //            try {
+            //                log_info( '[Header]\n', jqXHR.getAllResponseHeaders() );
+            //                log_debug( jqXHR.responseText );
+            //            }
+            //            catch ( error ) {
+            //            }
+            //            
+            //            reject( {
+            //                url : url,
+            //                success : false,
+            //                html : '',
+            //                textStatus : textStatus,
+            //                jqXHR : jqXHR
+            //            } );
+            //        } );
+            //    } );
+            //},
+            // TODO: 2020/09半ばより、環境によっては注文履歴が暗号化されて含まれるようになった（デコード方法が不明）
+            // →やむを得ず、IFRAMEを用いた方法に変更（ただし、パフォーマンスが落ちてしまう）
+            */
+            
+            _callback_map = {},
+            
+            loading_dialog = self.loading_dialog.init_counter( url_list.length, 0 ).counter_show(),
+            
             _fetch_url = ( url ) => {
                 return new Promise( ( resolve, reject ) => {
-                    $.ajax( {
-                        url : get_absolute_url( url ),
-                        type : 'GET',
-                        dataType : 'html',
-                        headers : { 'Accept' : "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8" },
-                        //beforeSend : function( xhr ) {
-                        //    xhr.setRequestHeader( 'X-Requested-With', { toString : function () { return '';} } );
-                        //},
-                        crossDomain : true
-                        // リクエストヘッダに X-Requested-With : XMLHttpRequest が含まれると、Amazon から HTML ではない形式で返されてしまう
-                        // → crossDomain を true にして X-Requested-With を送信しないようにする
-                        // ※参考: 
-                        //   [jquery - can i remove the X-Requested-With header from ajax requests? - Stack Overflow](https://stackoverflow.com/questions/3372962/can-i-remove-the-x-requested-with-header-from-ajax-requests)
-                        //   [javascript - jQueryのcrossDomainオプションが効かない - スタック・オーバーフロー](https://ja.stackoverflow.com/questions/5406/jquery%E3%81%AEcrossdomain%E3%82%AA%E3%83%97%E3%82%B7%E3%83%A7%E3%83%B3%E3%81%8C%E5%8A%B9%E3%81%8B%E3%81%AA%E3%81%84)
-                    } )
-                    .done( ( html, textStatus, jqXHR ) => {
+                    var check_timeout = 60000,
+                        
+                        start_time = Date.now(),
+                        
+                        child_window_options = {
+                            is_iframe : true,
+                            open_parameters : {
+                                type : 'ORDER_HISTORY_PART',
+                                request_page_url : url,
+                            }
+                        },
+                        
+                        child_window = open_child_window( url, child_window_options ),
+                        child_window_id = child_window_options.open_parameters.child_window_id ,
+                        iframe = child_window_options.result_info.iframe,
+                        
+                        timeout_time_id = setTimeout( () => {
+                            log_error( '[Fetch Failure] Timeout:', url );
+                            _callback_map[ child_window_id ] = null;
+                            iframe.remove();
+                            loading_dialog.counter_increment();
+                            
+                            reject( {
+                                url : url,
+                                success : false,
+                                html : '',
+                                textStatus : 'Timeout',
+                            } );
+                            
+                        }, check_timeout );
+                    
+                    log_debug( '_fetch_url() start:', url );
+                    
+                    _callback_map[ child_window_id ] = ( result ) => {
+                        log_debug( '_fetch_url() end:', Date.now() - start_time, 'ms', url, result );
+                        clearTimeout( timeout_time_id );
+                        _callback_map[ child_window_id ] = null;
+                        iframe.remove();
+                        loading_dialog.counter_increment();
+                        
                         resolve( {
                             url : url,
                             success : true,
-                            html : html,
-                            textStatus : textStatus,
-                            jqXHR : jqXHR
+                            html : result.html,
+                            textStatus : 'OK',
                         } );
-                    } )
-                    .fail( ( jqXHR, textStatus, errorThrown ) => {
-                        // TODO: HTML 取得に失敗することがあるらしい(バージョン 0.1.0.12にて発生報告有り)
-                        // →当該 URL について、エラー確認用出力追加＆とりあえず無視する
-                        log_error( '[Fetch Failure]\n', url, '\n', jqXHR.status, jqXHR.statusText );
-                        try {
-                            log_info( '[Header]\n', jqXHR.getAllResponseHeaders() );
-                            log_debug( jqXHR.responseText );
-                        }
-                        catch ( error ) {
-                        }
-                        
-                        reject( {
-                            url : url,
-                            success : false,
-                            html : '',
-                            textStatus : textStatus,
-                            jqXHR : jqXHR
-                        } );
-                    } );
+                    };
+                    
                 } );
             },
             
             promise_functions = url_list.map( ( url ) => _fetch_url.bind( self, url ) );
+        
+        $( window ).on( 'message', function ( jq_event ) {
+            var event = jq_event.originalEvent;
+            
+            log_debug( 'message received: event=', event );
+            
+            if ( event.origin != get_origin_url() ) {
+                log_error( 'origin error:', event.origin );
+                return;
+            }
+            
+            var callback = _callback_map[ event.data.child_window_id ];
+            
+            if ( callback ) {
+                callback( event.data );
+            }
+        } );
         
         window.concurrent_promise.execute( promise_functions, max_concurrent_number )
         .then( ( result_info ) => {
@@ -1911,6 +1999,8 @@ var TemplateOrderHistoryFilter = {
             log_debug( 'fetch_result_list:', fetch_result_list );
             log_debug( 'fetch_failure_list:', fetch_failure_list );
             
+            $( window ).off( 'message' );
+            
             callback( {
                 success : true,
                 fetch_result_list : fetch_result_list,
@@ -1920,6 +2010,8 @@ var TemplateOrderHistoryFilter = {
         .catch( ( result_info ) => {
             // ※ここには入らないはず
             log_error( '*** [BUG] ***\n', result_info );
+            
+            $( window ).off( 'message' );
             
             callback( {
                 success : false,
@@ -4089,6 +4181,49 @@ function init_order_page_in_iframe( open_parameters ) {
 } // end of init_order_page_in_iframe()
 
 
+function init_order_history_part_in_iframe( open_parameters ) {
+    log_debug( 'init_order_history_part_in_iframe() start:', location.href, open_parameters );
+    
+    var start_time = Date.now(),
+        callback = ( records ) => {
+            var stop_request = false;
+            
+            stop_observe();
+            try {
+                var encrypted_elements = document.querySelectorAll( '.csd-encrypted-sensitive' ),
+                    order_infos = document.querySelectorAll( '#ordersContainer .order .order-info' );
+                
+                log_debug( location.href, 'encrypted_elements:', encrypted_elements.length, 'order_infos:', order_infos.length );
+                
+                if ( ( encrypted_elements.length <= 0 ) && ( 0 < order_infos.length ) ) {
+                    log_debug( 'init_order_history_part_in_iframe() start:', Date.now() - start_time, 'ms', location.href );
+                    
+                    stop_request = true;
+                    window.parent.postMessage( {
+                        child_window_id : open_parameters.child_window_id,
+                        request_page_url : open_parameters.request_page_url,
+                        html : document.doctype.valueOf() + '\n' + document.documentElement.outerHTML,
+                        error : false,
+                    }, get_origin_url() );
+                }
+            }
+            catch ( error ) {
+                log_error( '***', error );
+            }
+            finally {
+                if ( ! stop_request ) {
+                    start_observe();
+                }
+            }
+        },
+        observer = new MutationObserver( callback ),
+        start_observe = () => observer.observe( document.body, { childList : true, subtree : true } ),
+        stop_observe = () => observer.disconnect();
+    
+    callback();
+} // end of init_order_history_part_in_iframe()
+
+
 function on_update_options( updated_options ) {
     if ( updated_options ) {
         Object.keys( updated_options ).forEach( function ( name ) {
@@ -4156,11 +4291,19 @@ function initialize( user_options ) {
     log_debug( 'open_parameters:', open_parameters );
     
     if ( open_parameters.child_window_id ) {
-        if ( typeof open_parameters.additional_order_urls != 'undefined' ) {
-            init_first_order_page( open_parameters );
-        }
-        else {
-            init_order_page_in_iframe( open_parameters );
+        switch ( open_parameters.type ) {
+            case 'ORDER_HISTORY_PART' :
+                init_order_history_part_in_iframe( open_parameters );
+                break;
+            
+            default:
+                if ( typeof open_parameters.additional_order_urls != 'undefined' ) {
+                    init_first_order_page( open_parameters );
+                }
+                else {
+                    init_order_page_in_iframe( open_parameters );
+                }
+                break;
         }
     }
     else {
