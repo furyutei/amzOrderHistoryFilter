@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.23
+// @version         0.1.0.24
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -2739,9 +2739,12 @@ var TemplateReceiptOutputPage = {
                 if ( 0 < jq_card_img.length ) {
                     card_type_list.push( jq_card_img.attr( 'alt' ) + ' ' + text );
                 }
-                else if ( /Amazon\s*ポイント/.test( text ) ) {
-                    card_type_list.push( text );
-                }
+                // 2020.09.29: Amazonポイントが再び明細に反映されるようになったため、（注意をうながす目的で記載していた）『クレカ種類』欄からは削除
+                /*
+                //else if ( /Amazon\s*ポイント/.test( text ) ) {
+                //    card_type_list.push( text );
+                //}
+                */
             } );
             
             card_info.card_type = card_type_list.join( '\n' );
