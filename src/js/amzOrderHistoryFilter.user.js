@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.24
+// @version         0.1.0.25
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -2698,8 +2698,13 @@ var TemplateReceiptOutputPage = {
         
         jq_order_summary_content.find( 'table table tr:gt(0)' ).each( function () {
             var jq_item = $( this ),
+                /*
                 jq_item_info = jq_item.find( 'td[align="left"]' ),
                 jq_item_price = jq_item.find( 'td[align="right"]' );
+                */
+                // 2020/10初旬頃から微妙に変更があった模様
+                jq_item_info = jq_item.find( '> td:eq(0)' ),
+                jq_item_price = jq_item.find( '> td:eq(1)' );
             
             if ( ( jq_item_info.length <= 0 ) || ( jq_item_price.length <= 0 ) ) {
                 return;
@@ -2717,7 +2722,11 @@ var TemplateReceiptOutputPage = {
             } );
         } );
         
-        order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:last td[colspan][align="right"]:contains("商品小計")' ) ) );
+        /*
+        //order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:last td[colspan][align="right"]:contains("商品小計")' ) ) );
+        */
+        // 2020/10初旬頃から微妙に変更があった模様
+        order_subtotal_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_content.find( 'tr:last td[colspan].a-text-right:contains("商品小計")' ) ) );
         order_total_price = get_price_number( get_child_text_from_jq_element( jq_order_summary_header.find( 'b:contains("注文の合計")' ) ) );
         
         var jq_payment_summary,
