@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.26
+// @version         0.1.0.27
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -1027,7 +1027,8 @@ var TemplateOrderHistoryFilter = {
                 'position' : 'absolute',
                 //'top' : '0',
                 //'top' : '-24px',
-                'top' : '-42px',
+                //'top' : '-42px',
+                'top' : '-54px',
                 'right' : '0',
                 'text-align' : 'right'
             } ),
