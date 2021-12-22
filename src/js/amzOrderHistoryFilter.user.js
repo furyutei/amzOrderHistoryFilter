@@ -446,7 +446,7 @@ function get_price_number( price_string ) {
         return '';
     }
     
-    var price_number_string = price_string.replace( /[^\d.\-]/g, '' ),
+    var price_number_string = price_string.replace( /[(（].*?[)）]/g, '' ).replace( /[^\d.\-]/g, '' ),
         price = parseInt( price_number_string, 10 );
     
     if ( isNaN( price ) ) {
