@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.27
+// @version         0.1.0.28
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -1047,7 +1047,8 @@ var TemplateOrderHistoryFilter = {
                 'min-width' : '50px',
                 'padding' : '4px 0 4px 4px',
                 'font-weight' : 'bolder',
-                'text-align' : 'right'
+                'text-align' : 'right',
+                'margin-top' : '14px',
             } ),
             
             current_date = new Date(),
@@ -1753,13 +1754,20 @@ var TemplateOrderHistoryFilter = {
             individual_order_info = {},
             jq_order_info = jq_order.children( '.order-info' ),
             jq_order_info_left = jq_order_info.find( '.a-col-left' ),
-            jq_order_date = jq_order_info_left.find( '.a-span3 .value' ),
+            // [2022/01/18] プライム・ワードローブ（Prime Try Before You Buy）の場合に日付と価格が正常に取得できず、「Partial order error」表示が出る不具合
+            //  通常の注文だと
+            //  「注文日」(.a-span3)「合計」(.a-span2)「お届け先」(.a-span4)「注文番号」
+            //  となっているところが、プライム・ワードローブ等の場合は
+            //  「注文日」(.a-span3)「注文の合計」(.a-span2)「請求の合計」(.a-span3)「お届け先」(.a-span4)「注文番号」
+            //  となっているため、状況に応じて場合分けするように修正
+            jq_a_span3_list = jq_order_info_left.find( '.a-span3' ),
+            jq_order_date = jq_a_span3_list.first().find( '.value' ),
             order_date = jq_order_date.text().trim(),
             order_date_info = { year : -1, month : -1, date : -1 },
             order_year,
             order_month,
             order_day,
-            order_price = jq_order_info_left.find( '.a-span2 .value' ).text().trim(),
+            order_price = ( ( 1 < jq_a_span3_list.length ) ? jq_a_span3_list.last() : jq_order_info_left.find( '.a-span2' ).first() ).find( '.value' ).text().trim(),
             order_price_number = ( typeof order_price == 'string' ) ? parseInt( order_price.replace( /[^\d.\-]/g, '' ), 10 ) : 0,
             order_destination = jq_order_info_left.find( '.recipient .a-size-base a.a-popover-trigger > .trigger-text' ).text().trim(),
             jq_order_info_actions = jq_order_info.find( '.actions' ),
