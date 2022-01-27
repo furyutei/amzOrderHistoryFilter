@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.28
+// @version         0.1.0.29
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -68,6 +68,9 @@ var OPTIONS = {
     REMOVE_REISSUE_STRINGS : false, // true: 「再発行」を取り除く
     ADDRESSEE_CHANGEABLE : true, // true: 宛名を設定・変更可
     ENABLE_PRINT_PREVIEW_BUTTON : true, // true: 印刷プレビューボタンを表示(Firefox用)
+    GET_PRODUCT_DETAIL_URL_FOR_CSV : true, // true: CSV用に商品の詳細URLを取得
+    MAX_CONCURRENT_FETCH_NUMBER_HISTORY : 10, // 注文履歴を並行してFETCH/IFRAMEでの読み込みを行う最大数
+    MAX_CONCURRENT_FETCH_NUMBER_RECEIPT : 10, // 領収書を並行してFETCH/IFRAMEでの読み込みを行う最大数
     
     DEFAULT_FILTER_INCLUDE_DIGITAL : true, // フィルタ対象(デジタルコンテンツ)のデフォルト値(true: 有効)
     DEFAULT_FILTER_INCLUDE_NONDIGITAL : false, // フィルタ対象(デジタルコンテンツ以外)のデフォルト値(true: 有効)
@@ -286,8 +289,8 @@ function get_absolute_url( path, base_url ) {
 
 var {
     open_child_window,
-    get_child_window_iframe,
-    remove_child_window_iframe,
+    //get_child_window_iframe,
+    //remove_child_window_iframe,
 } = ( () => {
     var child_window_counter = 0,
         
@@ -359,7 +362,8 @@ var {
                         } );
                     }
                     
-                    result_info.iframe = name_to_iframe_map[ name ] = jq_iframe[ 0 ];
+                    //result_info.iframe = name_to_iframe_map[ name ] = jq_iframe[ 0 ];
+                    result_info.iframe = jq_iframe[ 0 ];
                 }
                 else {
                     child_window = window.open( url, name );
@@ -369,23 +373,27 @@ var {
             result_info.child_window = child_window;
             
             return child_window;
-        }, // end of open_child_window()
+        }; // end of open_child_window()
         
-        get_child_window_iframe = ( child_window ) => name_to_iframe_map[ child_window.name ],
-        // TODO: child_window.name にアクセスした際、Uncaught TypeError: no access エラーになるケース有り
+        /*
+        //get_child_window_iframe = ( child_window ) => name_to_iframe_map[ child_window.name ],
+        //// TODO: child_window.name にアクセスした際、Uncaught TypeError: no access エラーになるケース有り
+        */
         
-        remove_child_window_iframe = ( child_window ) => {
-            var target_iframe = get_child_window_iframe( child_window );
-            
-            if ( target_iframe ) {
-                target_iframe.remove();
-            }
-        };
+        /*
+        //remove_child_window_iframe = ( child_window ) => {
+        //    var target_iframe = get_child_window_iframe( child_window );
+        //    
+        //    if ( target_iframe ) {
+        //        target_iframe.remove();
+        //    }
+        //};
+        */
        
     return {
         open_child_window,
-        get_child_window_iframe,
-        remove_child_window_iframe,
+        //get_child_window_iframe,
+        //remove_child_window_iframe,
     };
 } )();
 
@@ -1868,7 +1876,7 @@ var TemplateOrderHistoryFilter = {
     fetch_all_html : function ( url_list, callback ) {
         var self = this,
             
-            max_concurrent_number = 10,
+            max_concurrent_number = OPTIONS.MAX_CONCURRENT_FETCH_NUMBER_HISTORY,
             
             loading_dialog = self.loading_dialog.init_counter( url_list.length, 0 ).counter_show(),
             
@@ -1971,13 +1979,13 @@ var TemplateOrderHistoryFilter = {
                             },
                             
                             child_window = open_child_window( url, child_window_options ),
-                            child_window_id = child_window_options.open_parameters.child_window_id ,
+                            child_window_id = child_window_options.open_parameters.child_window_id,
                             iframe = child_window_options.result_info.iframe,
                             
                             timeout_time_id = setTimeout( () => {
                                 log_error( '[Fetch Failure] Timeout:', url );
                                 _callback_map[ child_window_id ] = null;
-                                iframe.remove();
+                                iframe.remove(); iframe = null;
                                 loading_dialog.counter_increment();
                                 
                                 reject( {
@@ -1989,6 +1997,9 @@ var TemplateOrderHistoryFilter = {
                                 
                             }, check_timeout );
                         
+                        delete child_window_options.result_info.iframe;
+                        delete child_window_options.result_info;
+                        
                         log_debug( '_fetch_url() start:', url );
                         
                         _url_map[ child_window_id ] = get_absolute_url( url );
@@ -1997,7 +2008,7 @@ var TemplateOrderHistoryFilter = {
                             log_debug( '_fetch_url() end:', Date.now() - start_time, 'ms', url, result );
                             clearTimeout( timeout_time_id );
                             _callback_map[ child_window_id ] = null;
-                            iframe.remove();
+                            iframe.remove(); iframe = null;
                             loading_dialog.counter_increment();
                             
                             resolve( {
@@ -2221,7 +2232,7 @@ var TemplateOrderHistoryFilter = {
 
 var TemplateReceiptOutputPage = {
     timeout_ms : 180000,
-    limit_parallel_request_number : 10,
+    limit_parallel_request_number : OPTIONS.MAX_CONCURRENT_FETCH_NUMBER_RECEIPT,
     
     jq_header_template : $( '<h2 class="receipt noprint"><a/></h2>' ),
     jq_hr_template : $( '<hr class="receipt"/>' ),
@@ -2235,6 +2246,7 @@ var TemplateReceiptOutputPage = {
         var self = this,
             
             request_order_urls = self.request_order_urls = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ),
+            display_complete_index = self.display_complete_index = -1,
             max_receipt_number = self.max_receipt_number = request_order_urls.length,
             
             loading_dialog = self.loading_dialog = object_extender( TemplateLoadingDialog ).init( {
@@ -2293,7 +2305,7 @@ var TemplateReceiptOutputPage = {
         }
         
         self.open_parameters = open_parameters;
-        self.result_waiting_counter = 1 + max_receipt_number;
+        self.result_waiting_counter = max_receipt_number;
         
         self.is_timeout = false;
         self.signin_request = false;
@@ -2326,7 +2338,6 @@ var TemplateReceiptOutputPage = {
                     return new Promise( ( resolve, reject ) => {
                         wait_for_rendering( function ( result ) {
                             self.on_rendering_complete( result.html );
-                            
                             resolve( 'The first page has been rendered.' );
                         }, {
                             is_digital : open_parameters.is_digital,
@@ -2432,6 +2443,32 @@ var TemplateReceiptOutputPage = {
     }, // end of create_jq_receipt_body()
     
     
+    update_display_page_body : function () {
+        var self = this,
+            request_order_urls = self.request_order_urls,
+            url_to_page_info = self.url_to_page_info,
+            jq_body = self.jq_body,
+            display_complete_index = self.display_complete_index;
+        
+        for ( var index = display_complete_index + 1; index < request_order_urls.length; index++ ) {
+            var order_url = request_order_urls[ index ],
+                page_info = url_to_page_info[ order_url ];
+            
+            if ( ( ! page_info ) || ( ! page_info.jq_receipt_body ) ) {
+                break;
+            }
+            if ( 0 < index ) {
+                jq_body.append( page_info.jq_receipt_body.children() );
+            }
+            delete page_info.jq_receipt_body;
+            delete page_info.html;
+            page_info.display_complete = true;
+            display_complete_index = index;
+        }
+        self.display_complete_index = display_complete_index;
+    }, // update_display_page_body()
+    
+    
     call_by_iframe : function ( request_order_url, receipt_number ) {
         var self = this;
         
@@ -2444,6 +2481,7 @@ var TemplateReceiptOutputPage = {
                     order_url : request_order_url,
                     resolve : resolve,
                     reject : reject,
+                    display_complete : false,
                 },
                 
                 call_reject = ( error_info, error_message ) => {
@@ -2454,6 +2492,8 @@ var TemplateReceiptOutputPage = {
                     page_info.html = html;
                     page_info.jq_receipt_body = self.create_jq_receipt_body( html, page_info.receipt_number, request_order_url );
                     page_info.order_parameters = null;
+                    
+                    self.update_display_page_body();
                     
                     self.loading_dialog.counter_increment();
                     self.result_waiting_counter --;
@@ -2504,8 +2544,7 @@ var TemplateReceiptOutputPage = {
                     
                     //remove_child_window_iframe( child_window );
                     // TODO: child_window.name にアクセスした際、Uncaught TypeError: no access エラーになるケース有り
-                    iframe.remove();
-                    
+                    iframe.remove(); iframe = null;
                     delete page_info.child_window;
                     delete page_info.remove_event_listener;
                 },
@@ -2518,6 +2557,9 @@ var TemplateReceiptOutputPage = {
                         'Request has been canceld.'
                     );
                 };
+            
+            delete child_window_options.result_info.iframe;
+            delete child_window_options.result_info;
             
             Object.assign( page_info, {
                 child_window : child_window,
@@ -2600,6 +2642,8 @@ var TemplateReceiptOutputPage = {
             }
         }
         
+        self.update_display_page_body();
+        
         self.loading_dialog.counter_increment();
         self.result_waiting_counter --;
         
@@ -2644,7 +2688,9 @@ var TemplateReceiptOutputPage = {
             url_to_page_info = self.url_to_page_info,
             refund_info_container_list = self.refund_info_container_list = [];
         
-        [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ).forEach( function ( order_url, index ) {
+        self.update_display_page_body();
+        
+        self.request_order_urls.forEach( function ( order_url, index ) {
             var page_info = url_to_page_info[ order_url ];
             
             try {
@@ -2659,9 +2705,11 @@ var TemplateReceiptOutputPage = {
             catch ( error ) {
             }
             
-            if ( 0 < index ) {
-                jq_body.append( page_info.jq_receipt_body.children() );
-            }
+            /*
+            //if ( 0 < index ) {
+            //    jq_body.append( page_info.jq_receipt_body.children() );
+            //}
+            */
         } );
         
         self.create_csv_download_button( jq_toolbox );
@@ -3248,6 +3296,7 @@ var TemplateReceiptOutputPage = {
                         number = 1,
                         price = 0,
                         item_name = '',
+                        item_name_for_search = '',
                         item_url = '';
                     
                     if ( ( jq_item_info.length <= 0 ) || ( jq_item_price.length <= 0 ) ) {
@@ -3262,17 +3311,20 @@ var TemplateReceiptOutputPage = {
                     }
                     
                     item_name = get_child_text_from_jq_element( jq_item_info.find( 'i' ) );
+                    item_name_for_search = item_name.replace( /\s+/g, '' );
                     item_url = '';
                     
-                    $( item_info_list ).each( function () {
-                        var item_info = this;
-                        
-                        if ( ( 0 <= item_info.item_name.indexOf( item_name ) || 0 <= item_name.indexOf( item_info.item_name ) ) ) {
-                            item_url = item_info.item_url;
-                            return false;
-                        }
-                    } );
-                    
+                    if ( item_name_for_search != '' ) {
+                        $( item_info_list ).each( function () {
+                            var item_info = this,
+                                item_info_item_name = item_info.item_name.replace( /\s+/g, '' );
+                            
+                            if ( ( item_info_item_name != '' ) && ( 0 <= item_info_item_name.indexOf( item_name_for_search ) || 0 <= item_name_for_search.indexOf( item_info_item_name ) ) ) {
+                                item_url = item_info.item_url;
+                                return false;
+                            }
+                        } );
+                    }
                     price = get_price_number( get_child_text_from_jq_element( jq_item_price ) );
                     item_list.push( {
                         name : item_name,
@@ -4159,21 +4211,40 @@ function init_order_page_in_iframe( open_parameters ) {
         }, // end of get_item_info_digital()
         
         get_item_info_list_nondigital = function ( jq_html_fragment ) {
-            var item_info_list = [];
+            var item_info_list = [],
+                item_url_map = {};
             
             //jq_html_fragment.find( '.shipment:not(:has(.a-text-bold:contains("返品"))) a.a-link-normal[href*="/gp/product/"]:not(:has(img))' )
             jq_html_fragment.find( '.shipment' ).filter( function () {
                 return ( $( this ).find( '.a-text-bold' ).text().indexOf( '返品' ) <  0 );
             } ).find( 'a.a-link-normal[href*="/gp/product/"]' ).filter( function () {
                 return ( $( this ).find( 'img' ).length <= 0 );
-            } )
-            .each( function () {
-                var jq_item_link = $( this );
+            } ).each( function () {
+                var jq_item_link = $( this ),
+                    item_url = get_absolute_url( jq_item_link.attr( 'href' ) );
                 
                 item_info_list.push( {
-                    item_url : get_absolute_url( jq_item_link.attr( 'href' ) ),
+                    item_url : item_url,
                     item_name : jq_item_link.text().replace( /[\s\u00a0\ufffd]+/g, ' ' ).trim()
                 } );
+                item_url_map[ item_url ] = true;
+            } );
+            
+            // [2022/01] ネットスーパー(ライフ)の商品情報が取得できるように対応
+            jq_html_fragment.find( '.a-row' ).filter( function () {
+                return ( $( this ).find( '.ufpo-item-image-column' ).length > 0 );
+            } ).find( 'a.a-link-normal[href*="/gp/product/"]' ).each( function () {
+                var jq_item_link = $( this ),
+                    item_url = get_absolute_url( jq_item_link.attr( 'href' ) );
+                
+                if ( item_url_map[ item_url ] ) {
+                    return;
+                }
+                item_info_list.push( {
+                    item_url : item_url,
+                    item_name : jq_item_link.find( 'span' ).text().replace( /[\s\u00a0\ufffd]+/g, ' ' ).trim()
+                } );
+                item_url_map[ item_url ] = true;
             } );
             
             return item_info_list;
@@ -4199,6 +4270,20 @@ function init_order_page_in_iframe( open_parameters ) {
     wait_for_rendering( on_rendering_complete, {
         is_digital : open_parameters.is_digital,
     } );
+    
+    if ( ! OPTIONS.GET_PRODUCT_DETAIL_URL_FOR_CSV ) {
+        order_detail_page_info = {
+            url : order_detail_url,
+            success : true,
+            error_message : 'Omit getting product detail URL',
+            refund_info : [],
+            item_info_list : [],
+        };
+        
+        finish();
+        
+        return;
+    }
     
     $.ajax( {
         url : order_detail_url,
