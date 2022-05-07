@@ -1,9 +1,7 @@
-( function () {
-
+( function ( window ) {
 'use strict';
 
 if ( typeof browser == 'undefined' ) { window.browser = chrome; }
-
 
 var DEBUG = false,
     SCRIPT_NAME = 'background',
@@ -63,15 +61,55 @@ function get_bool( value ) {
 }  // end of get_bool()
 
 
-function save_tab_info() {
+function get_values( key_list ) {
+    return new Promise( function ( resolve, reject ) {
+        if ( typeof key_list == 'string' ) {
+            key_list = [ key_list ];
+        }
+        browser.storage.local.get( key_list, function ( items ) {
+            resolve( items );
+        } );
+    } );
+} // end of get_values()
+
+
+async function get_value( key ) {
+    var items = await get_values( [ key ] );
+    return items[ key ];
+} // end of get_value()
+
+
+function set_value( key, value ) {
+    return new Promise( function ( resolve, reject ) {
+        browser.storage.local.set( {
+            [ key ] : value
+        }, function () {
+            resolve();
+        } );
+    } );
+} // end of set_value()
+
+
+function remove_values( key_list ) {
+    return new Promise( function ( resolve, reject ) {
+        browser.storage.local.remove( key_list, function () {
+            resolve();
+        } );
+    } );
+} // end of remove_values()
+
+
+async function save_tab_info() {
     log_debug( 'save_tab_info()', TAB_LIST, TAB_MAP );
-    localStorage.setItem( 'TAB_INFO', JSON.stringify( { tab_list : TAB_LIST, tab_map : TAB_MAP } ) );
-} // end of load_tab_info()
+    //localStorage.setItem( 'TAB_INFO', JSON.stringify( { tab_list : TAB_LIST, tab_map : TAB_MAP } ) );
+    await set_value( 'TAB_INFO', JSON.stringify( { tab_list : TAB_LIST, tab_map : TAB_MAP } ) );
+} // end of save_tab_info()
 
 
-function load_tab_info() {
+async function load_tab_info() {
     try {
-        var tab_info = JSON.parse( localStorage.getItem( 'TAB_INFO' ) );
+        //var tab_info = JSON.parse( localStorage.getItem( 'TAB_INFO' ) );
+        var tab_info = JSON.parse( await get_value( 'TAB_INFO' ) );
         
         TAB_LIST = tab_info.tab_list;
         TAB_MAP = tab_info.tab_map;
@@ -94,22 +132,29 @@ function load_tab_info() {
 function get_tab_info( tab_id ) {
     return new Promise( function ( resolve, reject ) {
         browser.tabs.get( tab_id, function ( tab ) {
-            load_tab_info();
-            
-            if ( ( ! tab ) || ( ! tab.id ) ) {
-                delete TAB_MAP[ tab_id ];
-                save_tab_info();
-            }
             // tab が undefined になる場合があるので注意
             // ※ Unchecked runtime.lastError while running tabs.get: No tab with id: 879. generated_background_page.html:1
-            resolve( tab );
+            load_tab_info().then( () => {
+                var callback = () => {
+                        resolve( tab );
+                    };
+                
+                if ( ( ! tab ) || ( ! tab.id ) ) {
+                    delete TAB_MAP[ tab_id ];
+                    save_tab_info().then( () => {
+                        callback();
+                    } );
+                    return;
+                }
+                callback();
+            } );
         } );
     } );
 } // end of get_tab_info()
 
 
-function register_tab( tab ) {
-    load_tab_info();
+async function register_tab( tab ) {
+    await load_tab_info();
     
     if ( ( ! tab ) || ( ! tab.id ) || ( TAB_MAP[ tab.id ] ) ) {
         return;
@@ -122,23 +167,28 @@ function register_tab( tab ) {
     TAB_MAP[ tab.id ] = tab;
     TAB_LIST.push( tab );
     
-    save_tab_info();
+    await save_tab_info();
 } // end of register_tab()
 
 
-function get_options( names, namespace ) {
-    var options = {};
+async function get_options( names, namespace ) {
+    //var options = {};
     
     if ( typeof names == 'string' ) {
         names = [ names ];
     }
     
-    Array.apply( null, names ).forEach( function( name ) {
-        name = String( name );
-        options[ name ] = localStorage[ ( ( namespace ) ? ( String( namespace ) + '_' ) : '' ) + name ];
-    } );
+    /*
+    //Array.apply( null, names ).forEach( function( name ) {
+    //    name = String( name );
+    //    options[ name ] = localStorage[ ( ( namespace ) ? ( String( namespace ) + '_' ) : '' ) + name ];
+    //} );
+    */
+    var name_prefix = ( namespace ) ? ( String( namespace ) + '_' ) : '',
+        names_with_namespace = Array.from( names ).map( name => name_prefix + name ),
+        options = await get_values( names_with_namespace );
     
-    log_debug( 'names=', names, 'options=', options );
+    log_debug( 'names_with_namespaces=', names_with_namespace, 'options=', options );
     
     return options;
 } // end of get_options()
@@ -158,13 +208,13 @@ function message_handler( message, sender, sendResponse ) {
         case 'GET_OPTIONS' :
             names = message.names;
             namespace = message.namespace;
-            response = options = get_options( names, namespace );
-            
-            register_tab( sender.tab );
-            
-            sendResponse( response );
-            
-            return;
+            get_options( names, namespace ).then( options => {
+                response = options;
+                register_tab( sender.tab ).then( () => {
+                    sendResponse( response );
+                } );
+            } );
+            return true;
         
         case 'PRINT_PREVIEW_REQUEST' :
             // [tabs.printPreview() - Mozilla | MDN](https://developer.mozilla.org/ja/Add-ons/WebExtensions/API/tabs/printPreview)
@@ -196,41 +246,40 @@ function message_handler( message, sender, sendResponse ) {
             
             sendResponse( response );
             
-            load_tab_info();
-            
-            Promise.all( TAB_LIST.map( function ( tab ) {
-                return get_tab_info( tab.id );
-            } ) )
-            .then( function ( refreshed_tab_list ) {
-                load_tab_info();
-                
-                TAB_LIST = refreshed_tab_list.filter( function ( tab ) {
-                    log_debug( 'check tab=', tab );
-                    
-                    if ( ( ! tab ) || ( ! tab.id ) ) {
-                        return false;
-                    }
-                    
-                    //if ( tab.discarded ) {
-                    //    delete TAB_MAP[ tab.id ];
-                    //    return false;
-                    //}
-                    
-                    log_debug( 'sendMessage to tab:', tab, options );
-                    
-                    browser.tabs.sendMessage( tab.id, {
-                        type : 'OPTION_UPDATE_REQUEST',
-                        options : options
-                    }, function ( response ) {
-                        log_debug( 'response from tab:', tab, response );
+            load_tab_info().then( () => {
+                Promise.all( TAB_LIST.map( function ( tab ) {
+                    return get_tab_info( tab.id );
+                } ) )
+                .then( function ( refreshed_tab_list ) {
+                    load_tab_info().then( () => {
+                        TAB_LIST = refreshed_tab_list.filter( function ( tab ) {
+                            log_debug( 'check tab=', tab );
+                            
+                            if ( ( ! tab ) || ( ! tab.id ) ) {
+                                return false;
+                            }
+                            
+                            //if ( tab.discarded ) {
+                            //    delete TAB_MAP[ tab.id ];
+                            //    return false;
+                            //}
+                            
+                            log_debug( 'sendMessage to tab:', tab, options );
+                            
+                            browser.tabs.sendMessage( tab.id, {
+                                type : 'OPTION_UPDATE_REQUEST',
+                                options : options
+                            }, function ( response ) {
+                                log_debug( 'response from tab:', tab, response );
+                            } );
+                            
+                            return true;
+                        } );
+                        
+                        save_tab_info();
                     } );
-                    
-                    return true;
                 } );
-                
-                save_tab_info();
             } );
-            
             return;
     }
     
@@ -246,16 +295,18 @@ function initialze() {
     TAB_LIST = [];
     TAB_MAP = {};
     
-    save_tab_info();
-    
-    log_debug( '*** initailize() [after]', TAB_LIST, TAB_MAP );
-    
-    // アイコンの状態も初期化する
-    var path_to_img = ( IS_EDGE ) ? 'img' : '../img',
-        icon_path = ( get_bool( localStorage[ 'OPERATION' ] ) !== false ) ? ( path_to_img + '/icon_16.png' ) : ( path_to_img + '/icon_16-gray.png' );
-    
-    browser.browserAction.setIcon( { path : icon_path } );
-    
+    save_tab_info().then( () => {
+        log_debug( '*** initailize() [after]', TAB_LIST, TAB_MAP );
+        
+        // アイコンの状態も初期化する
+        var path_to_img = ( IS_EDGE ) ? 'img' : '../img';
+            //icon_path = ( get_bool( localStorage[ 'OPERATION' ] ) !== false ) ? ( path_to_img + '/icon_16.png' ) : ( path_to_img + '/icon_16-gray.png' );
+        
+        get_value( 'OPERATION' ).then( operation => {
+            var icon_path = ( get_bool( operation ) !== false ) ? ( path_to_img + '/icon_16.png' ) : ( path_to_img + '/icon_16-gray.png' );
+            ( browser.browserAction || browser.action ).setIcon( { path : icon_path } );
+        } );
+    } );
 } // end of initialze()
 
 
@@ -265,7 +316,7 @@ browser.runtime.onMessage.addListener( message_handler );
 
 // TODO: background.js が「 "persistent" : false 」で動いている場合、グローバル変数が保持されない
 // → 暫定的に localStorage を介して読み書きする
-load_tab_info();
-log_debug( '*** background called ***', TAB_LIST, TAB_MAP );
-
-} )();
+load_tab_info().then( () => {
+    log_debug( '*** background called ***', TAB_LIST, TAB_MAP );
+});
+} )( typeof window !== 'undefined' ? window : self );

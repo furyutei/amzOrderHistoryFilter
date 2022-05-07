@@ -1,0 +1,2 @@
+#! /bin/sh
+cp -a ./src/manifest-chrome.json ./src/manifest.json

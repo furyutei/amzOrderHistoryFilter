@@ -96,6 +96,44 @@ function get_bool( value ) {
 }  // end of get_bool()
 
 
+function get_values( key_list ) {
+    return new Promise( function ( resolve, reject ) {
+        if ( typeof key_list == 'string' ) {
+            key_list = [ key_list ];
+        }
+        browser.storage.local.get( key_list, function ( items ) {
+            resolve( items );
+        } );
+    } );
+} // end of get_values()
+
+
+async function get_value( key ) {
+    var items = await get_values( [ key ] );
+    return items[ key ];
+} // end of get_value()
+
+
+function set_value( key, value ) {
+    return new Promise( function ( resolve, reject ) {
+        browser.storage.local.set( {
+            [ key ] : value
+        }, function () {
+            resolve();
+        } );
+    } );
+} // end of set_value()
+
+
+function remove_values( key_list ) {
+    return new Promise( function ( resolve, reject ) {
+        browser.storage.local.remove( key_list, function () {
+            resolve();
+        } );
+    } );
+} // end of remove_values()
+
+
 function send_option_update_notice( option_names ) {
     log_debug( 'send_option_update_notice()', option_names );
     
@@ -140,7 +178,7 @@ $( function () {
         var path_to_img = ( IS_EDGE ) ? 'img' : '../img',
             icon_path = ( is_active ) ? ( path_to_img + '/icon_16.png' ) : ( path_to_img + '/icon_16-gray.png' );
         
-        browser.browserAction.setIcon( { path : icon_path } );
+        ( browser.browserAction || browser.action ).setIcon( { path : icon_path } );
     } // end of set_operation_status()
     
     
@@ -164,23 +202,26 @@ $( function () {
         } // end of check_operation()
         
         
-        var name = info.name,
-            source_value = get_normalized_value( localStorage[ name ] ),
-            jq_checkbox = $( 'input#' + name + ':checkbox' );
+        var name = info.name;
         
-        jq_checkbox
-            .unbind( 'change' )
-            .prop( 'checked', source_value )
-            .on( 'change', function () {
-                var bool_value = localStorage[ name ] = get_normalized_value( jq_checkbox.prop( 'checked' ) );
-                
-                check_operation( name, bool_value );
-                
-                send_option_update_notice( name );
-            } );
-        
-        check_operation( name,  source_value );
-    
+        get_value( name ).then( value => {
+            var source_value = get_normalized_value( value ),
+                jq_checkbox = $( 'input#' + name + ':checkbox' );
+            
+            jq_checkbox
+                .unbind( 'change' )
+                .prop( 'checked', source_value )
+                .on( 'change', function () {
+                    var bool_value = get_normalized_value( jq_checkbox.prop( 'checked' ) );
+                    
+                    set_value( name, bool_value ).then( () => {
+                        check_operation( name, bool_value );
+                        send_option_update_notice( name );
+                    } );
+                } );
+            
+            check_operation( name,  source_value );
+        } );
     } // end of set_checkbox_event()
     
     
@@ -194,31 +235,35 @@ $( function () {
             return ( bool_value ) ? '1' : '0';
         }
         
-        var name = info.name,
-            source_value = get_normalized_value( localStorage[ name ] ),
-            jq_target = $( '#' + name ),
-            jq_inputs = jq_target.find( 'input:radio' );
+        var name = info.name;
         
-        jq_inputs
-            .each( function () {
-                var jq_input = $( this ),
-                    val = jq_input.val();
-                
-                if ( val === source_value ) {
-                    jq_input.prop( 'checked', 'checked' );
-                }
-                else {
-                    jq_input.prop( 'checked', false );
-                }
-            } )
-            .unbind( 'change' )
-            .on( 'change', function () {
-                var jq_input = $( this );
-                
-                localStorage[ name ] = get_normalized_value( jq_input.val() );
-                
-                send_option_update_notice( name );
-            } );
+        get_value( name ).then( value => {
+            var source_value = get_normalized_value( value ),
+                jq_target = $( '#' + name ),
+                jq_inputs = jq_target.find( 'input:radio' );
+            
+            jq_inputs
+                .each( function () {
+                    var jq_input = $( this ),
+                        val = jq_input.val();
+                    
+                    if ( val === source_value ) {
+                        jq_input.prop( 'checked', 'checked' );
+                    }
+                    else {
+                        jq_input.prop( 'checked', false );
+                    }
+                } )
+                .unbind( 'change' )
+                .on( 'change', function () {
+                    var jq_input = $( this );
+                    
+                    set_value( name, get_normalized_value( jq_input.val() ) ).then( () => {
+                        send_option_update_notice( name );
+                    } );
+                } );
+        } );
+        
     } // end of set_radio_event()
     
     
@@ -237,27 +282,31 @@ $( function () {
             return source_value;
         }
         
-        var name = info.name,
-            source_value = get_normalized_value( localStorage[ name ] ),
-            jq_target = $( '#' + name ),
-            jq_input = jq_target.find( 'input:text:first' ),
-            jq_current = jq_target.find( 'span.current:first' );
+        var name = info.name;
         
-        jq_current.text( source_value );
-        jq_input.val( source_value );
-        
-        jq_target
-            .find( 'input:button' )
-            .unbind( 'click' )
-            .on( 'click', function () {
-                var source_value = get_normalized_value( info, jq_input.val() );
-                
-                localStorage[ name ] = source_value;
-                jq_current.text( source_value );
-                jq_input.val( source_value );
-                
-                send_option_update_notice( name );
-            } );
+        get_value( name ).then( value => {
+            var source_value = get_normalized_value( value ),
+                jq_target = $( '#' + name ),
+                jq_input = jq_target.find( 'input:text:first' ),
+                jq_current = jq_target.find( 'span.current:first' );
+            
+            jq_current.text( source_value );
+            jq_input.val( source_value );
+            
+            jq_target
+                .find( 'input:button' )
+                .unbind( 'click' )
+                .on( 'click', function () {
+                    var source_value = get_normalized_value( info, jq_input.val() );
+                    
+                    set_value( name, source_value ).then( () => {
+                        jq_current.text( source_value );
+                        jq_input.val( source_value );
+                        send_option_update_notice( name );
+                    } );
+                } );
+            
+        } );
     } // end of set_int_event()
     
     
@@ -275,27 +324,30 @@ $( function () {
             return source_value;
         }
         
-        var name = info.name,
-            source_value = get_normalized_value( info, localStorage[ name ] ),
-            jq_target = $( '#' + name ),
-            jq_input = jq_target.find( 'input:text:first' ),
-            jq_current = jq_target.find( 'span.current:first' );
+        var name = info.name;
         
-        jq_current.text( source_value );
-        jq_input.val( source_value );
-        
-        jq_target
-            .find( 'input:button' )
-            .unbind( 'click' )
-            .on( 'click', function () {
-                var source_value = get_normalized_value( info, jq_input.val() );
-                
-                localStorage[ name ] = source_value;
-                jq_current.text( source_value );
-                jq_input.val( source_value );
-                
-                send_option_update_notice( name );
-            } );
+        get_value( name ).then( value => {
+            var source_value = get_normalized_value( info, value ),
+                jq_target = $( '#' + name ),
+                jq_input = jq_target.find( 'input:text:first' ),
+                jq_current = jq_target.find( 'span.current:first' );
+            
+            jq_current.text( source_value );
+            jq_input.val( source_value );
+            
+            jq_target
+                .find( 'input:button' )
+                .unbind( 'click' )
+                .on( 'click', function () {
+                    var source_value = get_normalized_value( info, jq_input.val() );
+                    
+                    set_value( name, source_value ).then( () => {
+                        jq_current.text( source_value );
+                        jq_input.val( source_value );
+                        send_option_update_notice( name );
+                    } );
+                } );
+        } );
     } // end of set_str_event()
     
     
@@ -309,13 +361,9 @@ $( function () {
         $( 'input[name="DEFAULT"]' )
             .unbind( 'click' )
             .on( 'click', function () {
-                //localStorage.clear();
-                
-                OPTION_NAMES.forEach( function ( option_name ) {
-                    localStorage.removeItem( option_name );
+                remove_values( OPTION_NAMES ).then( () => {
+                    set_option_events( true );
                 } );
-                
-                set_option_events( true );
                 //location.reload();
             } );
         
