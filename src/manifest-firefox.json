@@ -2,7 +2,7 @@
     "manifest_version" : 2,
     "name" : "__MSG_ext_title__",
     "short_name" : "__MSG_ext_short_name__",
-    "version" : "0.1.0.3001",
+    "version" : "0.1.0.3101",
     "description" : "__MSG_ext_description__",
     "author" : "furyu",
     "default_locale" : "ja",
@@ -21,6 +21,14 @@
     },
     
     "content_scripts" : [
+        {
+            "matches" : [
+                "https://www.amazon.co.jp/gp/css/order-history*"
+            ],
+            "js" : [ "js/redirect.js" ],
+            "run_at" : "document_start",
+            "all_frames" : false
+        },
         {
             "matches" : [
                 "https://www.amazon.co.jp/gp/your-account/order-history*",

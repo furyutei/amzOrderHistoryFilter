@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.29
+// @version         0.1.0.31
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
@@ -831,7 +831,6 @@ var TemplateOrderHistoryFilter = {
         self.under_suspension = !! under_suspension;
         
         var order_filter = $( 'select#orderFilter' );
-        
         if ( order_filter.length <= 0 || order_filter.parents( '#controlsContainer' ).length <= 0 ) {
             return self;
         }
@@ -1788,8 +1787,16 @@ var TemplateOrderHistoryFilter = {
                 '[href*="/order/edit.html"][href*="useCase=cancel"]',
                 '[href*="/ss/help/contact/"][href*="cancelRequest=1"]'
             ].join( ',' ) ),
-            jq_order_details = jq_order.children( '.a-box:not(.order-info)' ),
-            jq_order_shipment_info_container = jq_order_details.find( '.js-shipment-info-container' ).clone(),
+            //jq_order_details = jq_order.children( '.a-box:not(.order-info)' ),
+            jq_order_details = jq_order.children( '.a-box:not(.order-info)' ).filter(function(){return ($(this).find('a[href*="archiveRequest=1"]').length < 1);}),
+            //jq_order_shipment_info_container = jq_order_details.find( '.js-shipment-info-container' ).clone(),
+            jq_order_shipment_info_container = ( () => {
+                let jq_order_shipment_info_container = jq_order_details.filter( '.shipment' );
+                if ( jq_order_shipment_info_container.length < 1 ) {
+                    jq_order_shipment_info_container = jq_order_shipment_info_container.find('.js-shipment-info-container');
+                }
+                return jq_order_shipment_info_container.clone();
+            })(),
             //jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row:not(:has(.a-button))' ).clone(),
             jq_order_item_infos = jq_order_details.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row:first .a-fixed-left-grid-col.a-col-right .a-row' ).filter( function () {
                 return ( $( this ).find( '.a-button' ).length <= 0 );
@@ -1799,6 +1806,14 @@ var TemplateOrderHistoryFilter = {
             order_shipment_info_text = '',
             order_item_info_text = '',
             search_index_text = '';
+        
+        if ( jq_cancel_button.length < 1 ) {
+            jq_cancel_button = jq_order_shipment_info_container.find( 'a[role="button"]' ).filter( [
+                '[href*="/your-account/order-edit.html"][href*="type=e"]',
+                '[href*="/order/edit.html"][href*="useCase=cancel"]',
+                '[href*="/ss/help/contact/"][href*="cancelRequest=1"]'
+            ].join( ',' ) );
+        }
         
         if ( ( typeof order_date == 'string' ) && ( order_date.match( /^[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)[^\d]*$/ ) ) ) {
             order_year = parseInt( RegExp.$1, 10 );
@@ -4064,6 +4079,16 @@ function is_order_history_page() {
 } // end of is_order_history_page()
 
 
+function is_unsupported_order_history_page() {
+    return /^\/gp\/css\/order-history\/?$/.test(new URL(location.href).pathname);
+} // end of is_unsupported_order_history_page()
+
+
+function get_supported_order_history_page_top_url() {
+    return `${new URL(location.href).origin}/gp/your-account/order-history?opt=ab&digitalOrders=1&unifiedOrders=1&returnTo=&__mk_ja_JP=%E3%82%AB%E3%82%BF%E3%82%AB%E3%83%8A&orderFilter=months-3`;
+} // get_supported_order_history_page_top_url()
+
+
 function is_receipt_page() {
     return /^https?:\/\/[^\/]+\/gp\/(?:digital\/your-account\/order-summary\.html|css\/summary\/print\.html)/.test( window.location.href );
 } // end of is_receipt_page()
@@ -4081,6 +4106,13 @@ function init_order_history_page() {
     
     if ( ! is_order_history_page() ) {
         return;
+    }
+    
+    if (typeof WEB_EXTENSION_INIT != 'function') {
+        if (is_unsupported_order_history_page()) {
+            location.replace(get_supported_order_history_page_top_url());
+            return;
+        }
     }
     
     ORDER_HISTORY_FILTER = object_extender( TemplateOrderHistoryFilter ).init( ! OPTIONS.OPERATION );
