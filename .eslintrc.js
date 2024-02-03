@@ -4,7 +4,7 @@ module.exports = {
     ],
     "env": {
         "browser": true,
-        "es6": true,
+        "es2021": true,
         "jquery": true,
         "node": true,
     },
@@ -19,7 +19,8 @@ module.exports = {
         "content": "readonly",
     },
     "parserOptions": {
-        "ecmaVersion": 2018
+        "ecmaVersion": "latest",
+        "sourceType": "module"
     },
     "rules": {
         "no-unused-vars": "off",
