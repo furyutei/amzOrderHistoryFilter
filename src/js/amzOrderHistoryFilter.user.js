@@ -3,9 +3,11 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.31
+// @version         0.1.0.32
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
+// @include         https://www.amazon.co.jp/your-orders/orders*
+// @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
 // @include         https://www.amazon.co.jp/ap/signin*
@@ -3462,18 +3464,39 @@ var TemplateReceiptOutputPage = {
         var self = this,
             jq_csv_download_button = self.jq_csv_download_button = $( '<button class="noprint"/>' );
         
-        jq_csv_download_button
-            .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
-            .text( OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT )
-            .css( {
-                'margin' : '4px',
-                'cursor' : 'pointer'
-            } )
-            .click( function ( event ) {
-                self.onclick_csv_download_button( event );
-            } )
-            .prependTo( jq_parent );
-        
+        if ((! self.open_parameters.is_digital) && document.querySelector('#pos_view_content')) {
+            jq_csv_download_button
+                .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
+                .attr( 'title', 'ページ構造が大きく変化したため対応できておりません(2024年02月現在)')
+                .text( 'CSVダウンロードはご利用いただけません' )
+                .css( {
+                    'color' : 'red',
+                    'margin' : '4px',
+                    'cursor' : 'pointer'
+                } )
+                .click( function ( event ) {
+                    if (! confirm('現在、適切なCSV内容が取得できない不具合があります。このまま続行しますか？')) {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        return;
+                    }
+                    self.onclick_csv_download_button( event );
+                } )
+                .prependTo( jq_parent );
+        }
+        else {
+            jq_csv_download_button
+                .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
+                .text( OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT )
+                .css( {
+                    'margin' : '4px',
+                    'cursor' : 'pointer'
+                } )
+                .click( function ( event ) {
+                    self.onclick_csv_download_button( event );
+                } )
+                .prependTo( jq_parent );
+        }
         return self;
     }, // end of create_csv_download_button()
     
@@ -4074,20 +4097,90 @@ var TemplateReceiptOutputPage = {
 
 
 // ■ ページ初期化処理 {
-function is_order_history_page() {
-    return /^https?:\/\/[^\/]+\/gp\/(?:your-account|css)\/order-history/.test( window.location.href );
-} // end of is_order_history_page()
-
-
-function is_unsupported_order_history_page() {
-    return /^\/gp\/css\/order-history\/?$/.test(new URL(location.href).pathname);
-} // end of is_unsupported_order_history_page()
-
-
-function get_supported_order_history_page_top_url() {
-    return `${new URL(location.href).origin}/gp/your-account/order-history?opt=ab&digitalOrders=1&unifiedOrders=1&returnTo=&__mk_ja_JP=%E3%82%AB%E3%82%BF%E3%82%AB%E3%83%8A&orderFilter=months-3`;
-} // get_supported_order_history_page_top_url()
-
+/*
+//function is_order_history_page() {
+//    return /^https?:\/\/[^\/]+\/gp\/(?:your-account|css|legacy)\/order-history/.test( window.location.href );
+//} // end of is_order_history_page()
+//
+//
+//function is_unsupported_order_history_page() {
+//    return /^\/gp\/css\/order-history\/?$/.test(new URL(location.href).pathname);
+//} // end of is_unsupported_order_history_page()
+//
+//
+//function get_supported_order_history_page_top_url() {
+//    return `${new URL(location.href).origin}/gp/your-account/order-history?opt=ab&digitalOrders=1&unifiedOrders=1&returnTo=&__mk_ja_JP=%E3%82%AB%E3%82%BF%E3%82%AB%E3%83%8A&orderFilter=months-3`;
+//} // get_supported_order_history_page_top_url()
+*/
+const
+    get_order_history_page_info = () => {
+        const
+            supported_order_page_content_container = document.querySelector('#yourOrders > #yourOrdersContent'),
+            unsupported_order_page_content_container = document.querySelector('.your-orders-content-container > .your-orders-content-container__content'),
+            is_order_history_page = ((supported_order_page_content_container?.querySelector(':scope > #controlsContainer > #orderTypeMenuContainer > [role="tablist"] > [role="tab"].selected')?.textContent ?? unsupported_order_page_content_container?.querySelector(':scope > .page-tabs > [role="tablist"] > [role="tab"].page-tabs__tab--selected')?.textContent ?? '').trim() == '注文');
+        return {
+            is_order_history_page,
+            is_supported: is_order_history_page && (supported_order_page_content_container != null),
+        };
+    };
+    
+const
+    normalize_order_history_page = (url) => {
+        if (! url) {
+            url = location.href;
+        }
+        const
+            url_object = new URL(url),
+            pathname = url_object.pathname,
+            search_param_map = [... url_object.searchParams].reduce((param_map, [name, value])=>(param_map[name] = value, param_map), {}),
+            create_order_history_url = (optional_param_list) => {
+                const
+                    new_search_params = new URLSearchParams([
+                        ['opt', 'ab'],
+                        ['digitalOrders', '1'],
+                        ['unifiedOrders', '1'],
+                        ['orderFilter', 'months-3'],
+                        //['returnTo', ''],
+                        //['__mk_ja_JP', 'カタカナ'],
+                    ]);
+                (optional_param_list ?? []).map(([name, value]) => new_search_params.set(name, value));
+                return new URL(`/gp/your-account/order-history?${new_search_params.toString()}`, url).href;
+            };
+        if (new RegExp('^/gp/(?:css|legacy)/order-history/?$').test(pathname)) {
+            return create_order_history_url();
+        }
+        if (new RegExp('^/gp/your-account/order-history(?:/|$)').test(pathname)) {
+            const
+                ref = (pathname.match('/ref=([^/]*)$') ?? [])[1];
+            if (ref) {
+                if (ref == 'ppx_yo_dt_b_yo_link') {
+                    return create_order_history_url();
+                }
+                return null; // TODO: refがあってかつ'ppx_yo_dt_b_yo_link'以外ならおそらく注文履歴ではないと思われるが、確証はない
+            }
+            if (search_param_map['search']) {
+                // 注文履歴検索ページは/ref=ppx_yo_dt_b_searchがつくと思われるが、念のためsearchパラメータがある場合もチェック
+                return null;
+            }
+            const
+                orderFilter = search_param_map['orderFilter'];
+            if (! orderFilter) {
+                return create_order_history_url();
+            }
+            if (/^(?:last\d+|months-\d+|year-\d+)$/.test(orderFilter)) {
+                return url;
+            }
+            return null;
+        }
+        if (new RegExp('^/your-orders/orders/?$').test(pathname)) {
+            const
+                orderFilter = search_param_map['timeFilter'] ?? 'months-3';
+            return create_order_history_url([
+                ['orderFilter', orderFilter],
+            ]);
+        }
+        return null;
+    };
 
 function is_receipt_page() {
     return /^https?:\/\/[^\/]+\/gp\/(?:digital\/your-account\/order-summary\.html|css\/summary\/print\.html)/.test( window.location.href );
@@ -4104,15 +4197,44 @@ function init_order_history_page() {
         return;
     }
     
-    if ( ! is_order_history_page() ) {
+    /*
+    //if ( ! is_order_history_page() ) {
+    //    return;
+    //}
+    //
+    //if (typeof WEB_EXTENSION_INIT != 'function') {
+    //    if (is_unsupported_order_history_page()) {
+    //        location.replace(get_supported_order_history_page_top_url());
+    //        return;
+    //    }
+    //}
+    */
+    const
+        order_history_page_info = get_order_history_page_info();
+    
+    if (! order_history_page_info.is_order_history_page) {
         return;
     }
     
-    if (typeof WEB_EXTENSION_INIT != 'function') {
-        if (is_unsupported_order_history_page()) {
-            location.replace(get_supported_order_history_page_top_url());
+    if (! order_history_page_info.is_supported) {
+        if (typeof WEB_EXTENSION_INIT == 'function') {
+            // 拡張機能の場合、未サポートページならredirect.jsにより既に遷移しているはず
+            log_error('unsupported order history page (perhaps the page structure has changed)');
             return;
         }
+        const
+            current_url = location.href,
+            normalized_order_history_page_url = normalize_order_history_page(current_url);
+        
+        if (! normalized_order_history_page_url) {
+            return;
+        }
+        if (normalized_order_history_page_url == current_url) {
+            log_error('unsupported order history page (perhaps the page structure has changed)');
+            return;
+        }
+        location.replace(normalized_order_history_page_url);
+        return;
     }
     
     ORDER_HISTORY_FILTER = object_extender( TemplateOrderHistoryFilter ).init( ! OPTIONS.OPERATION );
@@ -4160,7 +4282,7 @@ function init_order_page_in_iframe( open_parameters ) {
         return;
     }
     
-    var order_detail_url = get_absolute_url( $( 'body > center:eq(-1) p > a' ).attr( 'href' ) ),
+    var order_detail_url = get_absolute_url( $( 'body > center:eq(-1) p > a, #pos_view_content a[href*="/edit.html"][href*="orderID"]' ).attr( 'href' ) ),
         order_detail_page_info = null,
         rendering_result = null,
         

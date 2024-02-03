@@ -2,7 +2,7 @@
     "manifest_version" : 3,
     "name" : "__MSG_ext_title__",
     "short_name" : "__MSG_ext_short_name__",
-    "version" : "0.1.0.3101",
+    "version" : "0.1.0.3201",
     "description" : "__MSG_ext_description__",
     "author" : "furyu",
     "default_locale" : "ja",
@@ -22,7 +22,10 @@
     "content_scripts" : [
         {
             "matches" : [
-                "https://www.amazon.co.jp/gp/css/order-history*"
+                "https://www.amazon.co.jp/gp/your-account/order-history*",
+                "https://www.amazon.co.jp/gp/css/order-history*",
+                "https://www.amazon.co.jp/your-orders/orders*",
+                "https://www.amazon.co.jp/gp/legacy/order-history*"
             ],
             "js" : [ "js/redirect.js" ],
             "run_at" : "document_start",
@@ -31,7 +34,6 @@
         {
             "matches" : [
                 "https://www.amazon.co.jp/gp/your-account/order-history*",
-                "https://www.amazon.co.jp/gp/css/order-history*",
                 "https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*",
                 "https://www.amazon.co.jp/gp/css/summary/print.html*",
                 "https://www.amazon.co.jp/ap/signin*"
