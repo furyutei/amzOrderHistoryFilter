@@ -2,7 +2,7 @@
     "manifest_version" : 2,
     "name" : "__MSG_ext_title__",
     "short_name" : "__MSG_ext_short_name__",
-    "version" : "0.1.0.3201",
+    "version" : "0.1.0.3301",
     "description" : "__MSG_ext_description__",
     "author" : "furyu",
     "default_locale" : "ja",
@@ -35,6 +35,7 @@
         {
             "matches" : [
                 "https://www.amazon.co.jp/gp/your-account/order-history*",
+                "https://www.amazon.co.jp/gp/legacy/order-history*",
                 "https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*",
                 "https://www.amazon.co.jp/gp/css/summary/print.html*",
                 "https://www.amazon.co.jp/ap/signin*"

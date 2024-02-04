@@ -4,6 +4,8 @@
 // - /gp/your-account/order-history/* でも未対応のページ構造の場合があることを確認（2024/01）
 // - 新たに /your-orders/orders?timeFilter=* や /gp/legacy/order-history のパターンも確認＆未対応のページ構造（2024/01）
 // →暫定的に、https://www.amazon.co.jp/gp/your-account/order-history?orderFilter=* にリダイレクト
+// →画面が真っ白になるとの報告あり
+//   暫定的に、https://www.amazon.co.jp/gp/legacy/order-history?orderFilter=* にリダイレクトに変更(2024/02/04)
 const
     normalize_order_history_page = (url) => {
         if (! url) {
@@ -24,19 +26,22 @@ const
                         //['__mk_ja_JP', 'カタカナ'],
                     ]);
                 (optional_param_list ?? []).map(([name, value]) => new_search_params.set(name, value));
-                return new URL(`/gp/your-account/order-history?${new_search_params.toString()}`, url).href;
+                return new URL(`/gp/legacy/order-history?${new_search_params.toString()}`, url).href;
             };
-        if (new RegExp('^/gp/(?:css|legacy)/order-history/?$').test(pathname)) {
+        if (new RegExp('^/gp/css/order-history/?$').test(pathname)) {
             return create_order_history_url();
         }
-        if (new RegExp('^/gp/your-account/order-history(?:/|$)').test(pathname)) {
+        if (new RegExp('^/gp/(?:legacy|your-account)/order-history(?:/|$)').test(pathname)) {
             const
                 ref = (pathname.match('/ref=([^/]*)$') ?? [])[1];
             if (ref) {
+                if (ref == 'ppx_yo_dt_b_orders') {
+                    return url;
+                }
                 if (ref == 'ppx_yo_dt_b_yo_link') {
                     return create_order_history_url();
                 }
-                return null; // TODO: refがあってかつ'ppx_yo_dt_b_yo_link'以外ならおそらく注文履歴ではないと思われるが、確証はない
+                return null; // TODO: refがあってかつ'ppx_yo_dt_b_orders'/'ppx_yo_dt_b_yo_link'以外ならおそらく注文履歴ではないと思われるが、確証はない
             }
             if (search_param_map['search']) {
                 // 注文履歴検索ページは/ref=ppx_yo_dt_b_searchがつくと思われるが、念のためsearchパラメータがある場合もチェック
@@ -48,7 +53,7 @@ const
                 return create_order_history_url();
             }
             if (/^(?:last\d+|months-\d+|year-\d+)$/.test(orderFilter)) {
-                return url;
+                return url.replace('/your-account/', '/legacy/');
             }
             return null;
         }
