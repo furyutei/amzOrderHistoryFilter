@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.0.33
+// @version         0.1.1.0
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/your-orders/orders*
@@ -827,17 +827,20 @@ var TemplateOrderHistoryFilter = {
     },
     
     
-    init : function ( under_suspension ) {
+    init : function ( under_suspension, order_history_page_info ) {
         var self = this;
         
         self.under_suspension = !! under_suspension;
         
-        var order_filter = $( 'select#orderFilter' );
-        if ( order_filter.length <= 0 || order_filter.parents( '#controlsContainer' ).length <= 0 ) {
+        var is_legacy_page = self.is_legacy_page = (order_history_page_info.legacy_order_page_content_container != null);
+        var $order_page_content_container = self.$order_page_content_container = $( order_history_page_info.order_page_content_container ?? order_history_page_info.legacy_order_page_content_container );
+        
+        var $order_filter = $order_page_content_container.find( is_legacy_page ? 'select#orderFilter' : 'select#time-filter' );
+        if ( $order_filter.length <= 0 ) {
             return self;
         }
         
-        var target_period = order_filter.val() || '';
+        var target_period = $order_filter.val() || '';
         
         try {
             if ( target_period.match( /^year-(\d{4})$/ ) ) {
@@ -959,7 +962,7 @@ var TemplateOrderHistoryFilter = {
             
             jq_filter_control = self.jq_filter_control = $( self.filter_control_template ).attr( 'id', SCRIPT_NAME + '-filter-control' ).css( {
                 'position' : 'relative',
-                'margin' : '0 0 4px 0',
+                'margin' : self.is_legacy_page ? '0 0 4px 0' : '12px 0 4px 0',
                 'min-height' : '80px'
             } ),
             
@@ -1225,7 +1228,9 @@ var TemplateOrderHistoryFilter = {
             jq_filter_control.hide();
         }
         
-        $( '#controlsContainer' ).append( jq_filter_control );
+        var $parent_container = self.is_legacy_page ? self.$order_page_content_container.find( '#controlsContainer' ) : self.$order_page_content_container.find( '.js-time-filter-form ' ).parent();
+        
+        $parent_container.append( jq_filter_control );
         
         return self;
     }, // end of init_filter_control()
@@ -1410,6 +1415,7 @@ var TemplateOrderHistoryFilter = {
     
     update_order_container : function () {
         var self = this,
+            is_legacy_page = self.is_legacy_page,
             jq_select_month = self.jq_select_month,
             jq_select_destination = self.jq_select_destination,
             target_month = self.target_month = parseInt( jq_select_month.val(), 10 ),
@@ -1433,7 +1439,7 @@ var TemplateOrderHistoryFilter = {
             month_order_info_lists = order_information.month_order_info_lists,
             current_order_info_list = order_information.current_order_info_list = [],
             target_month_order_info_list = month_order_info_lists[ target_month ],
-            jq_order_container = $( '#ordersContainer' ),
+            jq_order_container = is_legacy_page ? self.$order_page_content_container.find('#ordersContainer') : self.$order_page_content_container,
             jq_insert_point = jq_order_container.children( '.a-row:last' ),
             jq_counter_digital_number = self.jq_counter_digital_number,
             jq_counter_nondigital_number = self.jq_counter_nondigital_number,
@@ -1467,7 +1473,7 @@ var TemplateOrderHistoryFilter = {
         
         $( window ).off( 'scroll.update_order_container resize.update_order_container' );
         
-        jq_order_container.find( '.order' ).remove();
+        jq_order_container.children( '.js-order-card' ).remove();
         
         target_month_order_info_list.forEach( function ( order_info ) {
             if ( ( ! filter_options.include_digital ) && ( order_info.is_digital ) ) {
@@ -1560,11 +1566,13 @@ var TemplateOrderHistoryFilter = {
     get_order_information : function () {
         var self = this,
             order_information = self.order_information,
+            is_legacy_page = self.is_legacy_page,
+            $order_page_content_container = self.$order_page_content_container,
             page_index = 0,
             max_page_index = 0,
             order_info_page_url_list = [],
             start_ms = new Date().getTime(),
-            last_page_url = $( 'div.pagination-full ul.a-pagination li.a-normal:last a' ).attr( 'href' ),
+            last_page_url = $order_page_content_container.find( is_legacy_page ? 'div.pagination-full ul.a-pagination li.a-normal:last a' : 'div.a-row ul.a-pagination li.a-normal:last a' ).attr( 'href' ),
             error_button = $( '<button/>' ).css( {
                 'margin-left' : '8px',
                 'color' : 'red'
@@ -1686,7 +1694,14 @@ var TemplateOrderHistoryFilter = {
             self.jq_button_print_receipt_nondigital.prop( 'disabled', false );
             self.jq_counter_container.css( 'color', 'gray' );
             
-            $( 'div.pagination-full' ).hide();
+            if ( is_legacy_page ) {
+                $order_page_content_container.find( 'div.pagination-full' ).hide();
+            }
+            else {
+                $order_page_content_container.find( 'div.a-row' ).filter( function () {
+                    return ( 0 < $( this ).find( 'ul.a-pagination' ).length );
+                } ).hide();
+            }
             
             self.loading_dialog.hide();
             
@@ -1713,14 +1728,22 @@ var TemplateOrderHistoryFilter = {
         
         order_info_page_fetch_result_list.forEach( function ( fetch_result ) {
             var jq_html_fragment = get_jq_html_fragment( fetch_result.html ),
-                jq_orders = jq_html_fragment.find( '#ordersContainer .order' );
+                order_history_page_info = get_order_history_page_info(jq_html_fragment.get(0)),
+                is_legacy_page = (order_history_page_info.legacy_order_page_content_container != null),
+                $order_page_content_container = $( order_history_page_info.order_page_content_container ?? order_history_page_info.legacy_order_page_content_container ),
+                jq_orders = $order_page_content_container.find( is_legacy_page ? '#ordersContainer > .js-order-card' : '> .js-order-card' );
             
             jq_orders.each( function () {
                 var jq_order = $( this ),
                     individual_order_info;
                 
                 try {
-                    individual_order_info = self.get_individual_order_info( jq_order );
+                    if ( is_legacy_page ) {
+                        individual_order_info = self.get_individual_order_info_legacy( jq_order );
+                    }
+                    else {
+                        individual_order_info = self.get_individual_order_info( jq_order );
+                    }
                 }
                 catch ( error ) {
                     log_error( '*** [BUG] ***' );
@@ -1758,10 +1781,133 @@ var TemplateOrderHistoryFilter = {
     }, // end of analyze_order_information()
     
     
+    get_individual_order_info_legacy : function ( jq_order ) {
+        var self = this,
+            jq_order_info = jq_order.children( '.order-info' ),
+            individual_order_info = self.get_individual_order_info_common( jq_order, jq_order_info );
+        
+        return individual_order_info;
+    }, // end of get_individual_order_info_legacy()
+    
+    
     get_individual_order_info : function ( jq_order ) {
         var self = this,
+            jq_order_info = jq_order.find( '> .order > .order-info' ),
+            individual_order_info = {};
+        
+        if (0 < jq_order_info.length) {
+            individual_order_info = self.get_individual_order_info_common( jq_order_info.parent(), jq_order_info );
+            return individual_order_info;
+        }
+        
+        var jq_box_group = jq_order.find('> .a-box-group'),
+            jq_order_header = jq_box_group.children( '.order-header' ),
+            jq_delivery_box_list = jq_box_group.children( '.delivery-box' ),
+            jq_order_footer = jq_box_group.children( '.order-footer' ),
+            jq_order_info_left = jq_order_header.find( '.a-col-left' ),
+            jq_a_span3_list = jq_order_info_left.find( '.a-span3' ),
+            jq_order_date = jq_a_span3_list.first().find( '.a-row:last .a-color-secondary' ),
+            order_date = jq_order_date.text().trim(),
+            order_date_info = { year : -1, month : -1, date : -1 },
+            order_year,
+            order_month,
+            order_day,
+            order_price = jq_order_info_left.find( '.yohtmlc-order-total' ).text().trim(),
+            order_price_number = ( typeof order_price == 'string' ) ? parseInt( order_price.replace( /[^\d.\-]/g, '' ), 10 ) : 0,
+            order_destination = jq_order_info_left.find( '.yohtmlc-recipient .a-declarative .a-popover-trigger' ).text().trim(),
+            jq_order_info_actions = jq_order_header.find( '.a-col-right' ),
+            order_id = jq_order_info_actions.find( '.yohtmlc-order-id [dir="ltr"]' ).text().trim(),
+            jq_order_info_actions_base = jq_order_info_actions.find( '.yohtmlc-order-level-connections' ),
+            order_detail_url = jq_order_info_actions_base.find( 'a.a-link-normal:first' ).attr( 'href' ),
+            order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' ),
+            jq_cancel_button = jq_delivery_box_list.find( '.a-fixed-right-grid-col.a-col-right .yohtmlc-shipment-level-connections a[role="button"]' ).filter( [
+                '[href*="/your-account/order-edit.html"][href*="type=e"]',
+                '[href*="/order/edit.html"][href*="useCase=cancel"]',
+                '[href*="/ss/help/contact/"][href*="cancelRequest=1"]'
+            ].join( ',' ) ),
+            jq_order_item_infos = jq_delivery_box_list.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left > .a-row.a-spacing-top-base .a-fixed-left-grid-col.a-col-right > .a-row' ).filter( function () {
+                return ( $( this ).find( '.a-button' ).length <= 0 );
+            } ).clone(),
+            jq_gift_card_recipient_list = jq_order_item_infos.find( '.gift-card-instance .recipient' ),
+            recipient_map = {},
+            order_shipment_info_text = jq_delivery_box_list.find( '.yohtmlc-shipment-status-primaryText' ).text().trim().replace( /\s+/g, ' ' ),
+            order_item_info_text = '',
+            search_index_text = '';
+        
+        if ( ( typeof order_date == 'string' ) && ( order_date.match( /^[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)[^\d]*$/ ) ) ) {
+            order_year = parseInt( RegExp.$1, 10 );
+            order_month = parseInt( RegExp.$2, 10 );
+            order_day = parseInt( RegExp.$3, 10 );
+            try {
+                if ( ! isNaN( new Date( '' + order_year + '-' + order_month + '-' + order_day ).getTime() ) ) {
+                    order_date_info.year = order_year;
+                    order_date_info.month = order_month;
+                    order_date_info.day = order_day;
+                    order_date_info.date = order_day;
+                }
+            }
+            catch ( error ) {
+            }
+        }
+        
+        if ( order_date_info.month < 0 ) {
+            log_error( '[malformed order date]\n', order_date, '\n', jq_order_date.html() );
+            log_info( jq_order.html() );
+        }
+        
+        if ( order_receipt_url ) {
+            // /ref=oh_aui_dpi_o*_ になっていると、まれにページが読み込まれないことがある
+            // → /ref=oh_aui_ajax_dpi に置換
+             order_receipt_url = order_receipt_url.replace( /\/ref=oh_aui_.*?\?/, '/ref=oh_aui_ajax_dpi?' );
+        }
+        
+        //jq_order_item_infos.remove( 'script, noscript' );
+        jq_order_item_infos.find( 'script, noscript' ).remove();
+        order_item_info_text = zen_to_han( jq_order_item_infos.text().trim().replace( /\s+/g, ' ' ) );
+        
+        search_index_text = ( order_id + ' ' + order_date + ' ' + order_shipment_info_text + ' ' + order_item_info_text ).toLowerCase();
+        
+        if ( order_destination ) {
+            recipient_map[ order_destination ] = order_destination;
+        }
+        
+        if ( order_destination ) {
+            // 商品券タイプのギフト券等でお届け先が存在する場合には重複するため、jq_gift_card_recipient_list（ギフト注文のシリアル番号が入っている）からは探さない
+        }
+        else {
+            // E メールタイプのギフト券等の送信先を取得
+            jq_gift_card_recipient_list.each( function() {
+                var recipient = $( this ).text().replace( /\s+/, ' ' ).trim();
+                
+                if ( recipient ) {
+                    recipient_map[ recipient ] = recipient;
+                }
+            } );
+        }
+        
+        individual_order_info = {
+            order_date : order_date,
+            order_date_info : order_date_info,
+            order_price : order_price,
+            order_price_number : order_price_number,
+            order_destination : order_destination,
+            order_id : order_id,
+            order_detail_url : order_detail_url,
+            order_receipt_url : order_receipt_url,
+            is_digital : ( order_receipt_url ) ? /\/gp\/digital\//.test( order_receipt_url ) : /^D/.test( order_id ),
+            is_reservation : ( ( 0 < jq_cancel_button.length ) && ( jq_delivery_box_list.length <= jq_cancel_button.length ) ),
+            search_index_text : search_index_text,
+            recipient_map : recipient_map,
+            jq_order : jq_order
+        };
+        
+        return individual_order_info;
+    }, // end of get_individual_order_info()
+    
+    
+    get_individual_order_info_common : function ( jq_order, jq_order_info ) {
+        var self = this,
             individual_order_info = {},
-            jq_order_info = jq_order.children( '.order-info' ),
             jq_order_info_left = jq_order_info.find( '.a-col-left' ),
             // [2022/01/18] プライム・ワードローブ（Prime Try Before You Buy）の場合に日付と価格が正常に取得できず、「Partial order error」表示が出る不具合
             //  通常の注文だと
@@ -1778,7 +1924,8 @@ var TemplateOrderHistoryFilter = {
             order_day,
             order_price = ( ( 1 < jq_a_span3_list.length ) ? jq_a_span3_list.last() : jq_order_info_left.find( '.a-span2' ).first() ).find( '.value' ).text().trim(),
             order_price_number = ( typeof order_price == 'string' ) ? parseInt( order_price.replace( /[^\d.\-]/g, '' ), 10 ) : 0,
-            order_destination = jq_order_info_left.find( '.recipient .a-size-base a.a-popover-trigger > .trigger-text' ).text().trim(),
+            //order_destination = jq_order_info_left.find( '.recipient .a-size-base a.a-popover-trigger > .trigger-text' ).text().trim(),
+            order_destination = jq_order_info_left.find( '.recipient .a-size-base a.a-popover-trigger' ).clone().remove('i').text().trim(), // 「お届け先」がa.a-popover-trigger > span.trigger-text中にある場合とa.a-popover-trigger直下の場合あり
             jq_order_info_actions = jq_order_info.find( '.actions' ),
             order_id = jq_order_info_actions.find( '.a-size-mini .value' ).text().trim(),
             jq_order_info_actions_base = jq_order_info_actions.find( '.a-size-base' ),
@@ -1795,7 +1942,8 @@ var TemplateOrderHistoryFilter = {
             jq_order_shipment_info_container = ( () => {
                 let jq_order_shipment_info_container = jq_order_details.filter( '.shipment' );
                 if ( jq_order_shipment_info_container.length < 1 ) {
-                    jq_order_shipment_info_container = jq_order_shipment_info_container.find('.js-shipment-info-container');
+                    //jq_order_shipment_info_container = jq_order_shipment_info_container.find('.js-shipment-info-container') // TODO: ←意味がないな…？
+                    jq_order_shipment_info_container = jq_order_details.find('.js-shipment-info-container'); // TODO: こっちでいいのかな…？
                 }
                 return jq_order_shipment_info_container.clone();
             })(),
@@ -1844,10 +1992,12 @@ var TemplateOrderHistoryFilter = {
              order_receipt_url = order_receipt_url.replace( /\/ref=oh_aui_.*?\?/, '/ref=oh_aui_ajax_dpi?' );
         }
         
-        jq_order_shipment_info_container.remove( 'script, noscript, .a-declarative' );
-        order_shipment_info_text = zen_to_han( jq_order_shipment_info_container.text().trim().replace( /\s+/g, ' ' ) );
+        //jq_order_shipment_info_container.remove( 'script, noscript, .a-declarative' );
+        jq_order_shipment_info_container.find( 'script, noscript, .a-declarative, .a-button' ).remove();
+        order_shipment_info_text = zen_to_han( jq_order_shipment_info_container.find( '.js-shipment-info-container' ).addBack( '.js-shipment-info-container' ).text().trim().replace( /\s+/g, ' ' ) );
         
-        jq_order_item_infos.remove( 'script, noscript' );
+        //jq_order_item_infos.remove( 'script, noscript' );
+        jq_order_item_infos.find( 'script, noscript' ).remove();
         order_item_info_text = zen_to_han( jq_order_item_infos.text().trim().replace( /\s+/g, ' ' ) );
         
         search_index_text = ( order_id + ' ' + order_date + ' ' + order_shipment_info_text + ' ' + order_item_info_text ).toLowerCase();
@@ -1887,7 +2037,7 @@ var TemplateOrderHistoryFilter = {
         };
         
         return individual_order_info;
-    }, // end of get_individual_order_info()
+    }, // end of get_individual_order_info_common()
     
     
     fetch_all_html : function ( url_list, callback ) {
@@ -1964,9 +2114,10 @@ var TemplateOrderHistoryFilter = {
         } )
         .done( ( html, textStatus, jqXHR ) => {
             var jq_html_fragment = get_jq_html_fragment( html ),
-                encrypted_elements = jq_html_fragment.find( '.csd-encrypted-sensitive' );
+                encrypted_elements = jq_html_fragment.find( '.csd-encrypted-sensitive' ),
+                shipping_address_elements = jq_html_fragment.find( '[id^="shipToInsertionNode-shippingAddress"]' ); // [2024/02] 「お届け先」も暗号化されるケースがある（その際、注文内容の暗号化は必ずしも行われない模様）
             
-            if ( 0 < encrypted_elements.length ) {
+            if ( ( 0 < encrypted_elements.length ) || ( 0 < shipping_address_elements.length ) ) {
                 log_debug( 'encrypted elements found' );
                 use_ajax = false;
             }
@@ -4113,76 +4264,23 @@ var TemplateReceiptOutputPage = {
 //} // get_supported_order_history_page_top_url()
 */
 const
-    get_order_history_page_info = () => {
+    get_order_history_page_info = (target_document) => {
+        if (! target_document) {
+            target_document = document;
+        }
         const
-            supported_order_page_content_container = document.querySelector('#yourOrders > #yourOrdersContent'),
-            unsupported_order_page_content_container = document.querySelector('.your-orders-content-container > .your-orders-content-container__content'),
-            is_order_history_page = ((supported_order_page_content_container?.querySelector(':scope > #controlsContainer > #orderTypeMenuContainer > [role="tablist"] > [role="tab"].selected')?.textContent ?? unsupported_order_page_content_container?.querySelector(':scope > .page-tabs > [role="tablist"] > [role="tab"].page-tabs__tab--selected')?.textContent ?? '').trim() == '注文');
+            legacy_order_page_content_container = target_document.querySelector('#yourOrders > #yourOrdersContent'),
+            order_page_content_container = target_document.querySelector('.your-orders-content-container > .your-orders-content-container__content');
         return {
-            is_order_history_page,
-            is_supported: is_order_history_page && (supported_order_page_content_container != null),
+            legacy_order_page_content_container,
+            order_page_content_container,
+            is_order_history_page : (
+                (
+                    legacy_order_page_content_container?.querySelector(':scope > #controlsContainer > #orderTypeMenuContainer > [role="tablist"] > [role="tab"].selected')?.textContent ??
+                    order_page_content_container?.querySelector(':scope > .page-tabs > [role="tablist"] > [role="tab"].page-tabs__tab--selected')?.textContent ?? ''
+                ).trim() == '注文'
+            ),
         };
-    };
-    
-const
-    normalize_order_history_page = (url) => {
-        if (! url) {
-            url = location.href;
-        }
-        const
-            url_object = new URL(url),
-            pathname = url_object.pathname,
-            search_param_map = [... url_object.searchParams].reduce((param_map, [name, value])=>(param_map[name] = value, param_map), {}),
-            create_order_history_url = (optional_param_list) => {
-                const
-                    new_search_params = new URLSearchParams([
-                        ['opt', 'ab'],
-                        ['digitalOrders', '1'],
-                        ['unifiedOrders', '1'],
-                        ['orderFilter', 'months-3'],
-                        //['returnTo', ''],
-                        //['__mk_ja_JP', 'カタカナ'],
-                    ]);
-                (optional_param_list ?? []).map(([name, value]) => new_search_params.set(name, value));
-                return new URL(`/gp/legacy/order-history?${new_search_params.toString()}`, url).href;
-            };
-        if (new RegExp('^/gp/css/order-history/?$').test(pathname)) {
-            return create_order_history_url();
-        }
-        if (new RegExp('^/gp/(?:legacy|your-account)/order-history(?:/|$)').test(pathname)) {
-            const
-                ref = (pathname.match('/ref=([^/]*)$') ?? [])[1];
-            if (ref) {
-                if (ref == 'ppx_yo_dt_b_orders') {
-                    return url;
-                }
-                if (ref == 'ppx_yo_dt_b_yo_link') {
-                    return create_order_history_url();
-                }
-                return null; // TODO: refがあってかつ'ppx_yo_dt_b_orders'/'ppx_yo_dt_b_yo_link'以外ならおそらく注文履歴ではないと思われるが、確証はない
-            }
-            if (search_param_map['search']) {
-                // 注文履歴検索ページは/ref=ppx_yo_dt_b_searchがつくと思われるが、念のためsearchパラメータがある場合もチェック
-                return null;
-            }
-            const
-                orderFilter = search_param_map['orderFilter'];
-            if (! orderFilter) {
-                return create_order_history_url();
-            }
-            if (/^(?:last\d+|months-\d+|year-\d+)$/.test(orderFilter)) {
-                return url.replace('/your-account/', '/legacy/');
-            }
-            return null;
-        }
-        if (new RegExp('^/your-orders/orders/?$').test(pathname)) {
-            const
-                orderFilter = search_param_map['timeFilter'] ?? 'months-3';
-            return create_order_history_url([
-                ['orderFilter', orderFilter],
-            ]);
-        }
-        return null;
     };
 
 function is_receipt_page() {
@@ -4219,28 +4317,7 @@ function init_order_history_page() {
         return;
     }
     
-    if (! order_history_page_info.is_supported) {
-        if (typeof WEB_EXTENSION_INIT == 'function') {
-            // 拡張機能の場合、未サポートページならredirect.jsにより既に遷移しているはず
-            log_error('unsupported order history page (perhaps the page structure has changed)');
-            return;
-        }
-        const
-            current_url = location.href,
-            normalized_order_history_page_url = normalize_order_history_page(current_url);
-        
-        if (! normalized_order_history_page_url) {
-            return;
-        }
-        if (normalized_order_history_page_url == current_url) {
-            log_error('unsupported order history page (perhaps the page structure has changed)');
-            return;
-        }
-        location.replace(normalized_order_history_page_url);
-        return;
-    }
-    
-    ORDER_HISTORY_FILTER = object_extender( TemplateOrderHistoryFilter ).init( ! OPTIONS.OPERATION );
+    ORDER_HISTORY_FILTER = object_extender( TemplateOrderHistoryFilter ).init( ! OPTIONS.OPERATION, order_history_page_info );
     
 } // end of init_order_history_page()
 
@@ -4489,11 +4566,12 @@ function init_order_history_part_in_iframe( open_parameters ) {
             stop_observe();
             try {
                 var encrypted_elements = document.querySelectorAll( '.csd-encrypted-sensitive' ),
-                    order_infos = document.querySelectorAll( '#ordersContainer .order .order-info' );
+                    order_infos = document.querySelectorAll( '.your-orders-content-container__content .order-card, #ordersContainer .order .order-info' ),
+                    shipping_address_elements = document.querySelectorAll('[id^="shipToInsertionNode-shippingAddress"]'); // [2024/02] 「お届け先」も暗号化されるケースがある（その際、注文内容の暗号化は必ずしも行われない模様）
                 
-                log_debug( location.href, 'encrypted_elements:', encrypted_elements.length, 'order_infos:', order_infos.length );
+                log_debug( location.href, 'encrypted_elements:', encrypted_elements.length, 'order_infos:', order_infos.length, 'shipping_address_elements:', shipping_address_elements.length );
                 
-                if ( ( encrypted_elements.length <= 0 ) && ( 0 < order_infos.length ) ) {
+                if ( ( encrypted_elements.length <= 0 ) && ( 0 < order_infos.length ) && ( shipping_address_elements.length == [ ... shipping_address_elements ].filter( element => element.querySelector('.a-declarative') != null ).length ) ) {
                     log_debug( 'init_order_history_part_in_iframe() start:', Date.now() - start_time, 'ms', location.href );
                     
                     stop_request = true;
