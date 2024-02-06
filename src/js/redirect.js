@@ -1,3 +1,4 @@
+ /* 2024/02/05現在未使用 */
 (() => {
 //[TODO]
 // - /gp/css/order-history のページ構造が大幅に変わってしまった模様（2022/09）
@@ -6,6 +7,7 @@
 // →暫定的に、https://www.amazon.co.jp/gp/your-account/order-history?orderFilter=* にリダイレクト
 // →画面が真っ白になるとの報告あり
 //   暫定的に、https://www.amazon.co.jp/gp/legacy/order-history?orderFilter=* にリダイレクトに変更(2024/02/04)
+// →現行の注文履歴画面に対応したため、リダイレクトは取りやめ（このスクリプトも実行しないように変更）(2024/02/05)
 const
     normalize_order_history_page = (url) => {
         if (! url) {

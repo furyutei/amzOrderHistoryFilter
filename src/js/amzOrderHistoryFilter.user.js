@@ -5,9 +5,9 @@
 // @author          furyu
 // @version         0.1.1.0
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
+// @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
 // @include         https://www.amazon.co.jp/your-orders/orders*
-// @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/digital/your-account/order-summary.html*
 // @include         https://www.amazon.co.jp/gp/css/summary/print.html*
 // @include         https://www.amazon.co.jp/ap/signin*
@@ -451,6 +451,27 @@ function get_child_text_from_jq_element( jq_element ) {
 } // end of get_child_text_from_jq_element()
 
 
+function $join_child_text($element) {
+    const
+        text_value_list = [];
+    
+    $element.contents().each(function () {
+        const
+            $child = $(this),
+            node_type = this.nodeType;
+        
+        switch (node_type) {
+            case 1:
+            case 3:
+                text_value_list.push($child.text().trim());
+                break;
+        }
+    });
+    
+    return text_value_list.join(' ').replace(/\s+/g, ' ').trim();
+} // end of $join_child_text()
+
+
 function get_price_number( price_string ) {
     if ( ! price_string ) {
         return '';
@@ -475,7 +496,7 @@ function wait_for_rendering( callback, options ) {
     log_debug( options.is_digital ? '[DIGITAL]' : '[NON-DIGITAL]', '*** wait_for_rendering(): begin', location.href );
     
     var min_wait_ms = ( options.min_wait_ms ) ? options.min_wait_ms : 3000,
-        max_wait_ms = ( options.max_wait_ms ) ? options.max_wait_ms : 60000,
+        max_wait_ms = ( options.max_wait_ms ) ? options.max_wait_ms : 120000,  // [2024/02/06] 6000→120000
         target_element = ( options.target_element ) ? options.target_element : document.body,
         
         jq_payment_breakdown_container = $( '#docs-order-summary-payment-breakdown-container' ),
@@ -1594,119 +1615,143 @@ var TemplateOrderHistoryFilter = {
                 $link.remove();
             };
         
-        if ( ! last_page_url ) {
-            //last_page_url = window.location.href;
-            // Error logged with the Track&Report JS errors API(http://tiny/1covqr6l8/wamazindeClieUserJava): {"m":"[CSM] Ajax request to same page detected xmlhttprequest : ～ }
-            last_page_url = window.location.href.replace( /&_aohtimestamp=\d+/g, '' ) + '&_aohtimestamp=' + new Date().getTime() ;
-        }
-        
-        if ( last_page_url.match( /[?&]startIndex=(\d+)/ ) ) {
-            max_page_index = parseInt( RegExp.$1, 10 );
-            
-            for ( page_index = 0; page_index <= max_page_index; page_index += 10 ) {
-                order_info_page_url_list.push( last_page_url.replace( /([?&]startIndex=)(\d+)/g, '$1' + page_index ) );
-            }
-        }
-        else {
-            order_info_page_url_list.push( last_page_url );
-        }
-        
         self.loading_dialog.show();
-        
         self.jq_message.text( '' );
         
-        self.fetch_all_html( order_info_page_url_list, function ( result ) {
-            log_debug( 'elapsed time:', ( new Date().getTime() - start_ms ) / 1000, 's', result );
-            
-            if ( ! result.success ) {
-                self.jq_message.text( result.error_message );
-                self.loading_dialog.hide();
-                return;
+        ( async () => {
+            if ( ! last_page_url ) {
+                //last_page_url = window.location.href;
+                // Error logged with the Track&Report JS errors API(http://tiny/1covqr6l8/wamazindeClieUserJava): {"m":"[CSM] Ajax request to same page detected xmlhttprequest : ～ }
+                last_page_url = window.location.href.replace( /&_aohtimestamp=\d+/g, '' ) + '&_aohtimestamp=' + new Date().getTime() ;
             }
             
-            if ( 0 < result.fetch_failure_list.length ) {
-                var failure_urls_text = result.fetch_failure_list.map( function ( fetch_failure_result ) {
-                        return get_absolute_url( fetch_failure_result.url );
-                    } ).join( '\n' );
+            if ( last_page_url.match( /[?&]startIndex=(\d+)/ ) ) {
+                max_page_index = parseInt( RegExp.$1, 10 );
                 
-                error_button.text( 'Download failure list' ).click( function ( event ) {
-                    download_text( 'download-error-urls.txt', failure_urls_text );
-                } );
-                self.jq_message.text( 'Partial download failure' ).append( error_button );
-            }
-            
-            self.analyze_order_information( result.fetch_result_list );
-            
-            if ( ( result.fetch_failure_list.length <= 0 ) && ( 0 < order_information.order_error_urls.length ) ) {
-                var error_urls_text = order_information.order_error_urls.join( '\n' );
-                
-                error_button.text( 'Download error list' ).click( function ( event ) {
-                    download_text( 'order-error-urls.txt', error_urls_text );
-                } );
-                self.jq_message.text( 'Partial order error' ).append( error_button );
-            }
-            
-            var destination_infos = order_information.destination_infos,
-                destination_info_list = [],
-                month_number = 0,
-                month_order_info_lists = order_information.month_order_info_lists,
-                jq_select_month = self.jq_select_month,
-                jq_select_month_option;
-            
-            Object.keys( order_information.destination_infos ).forEach( function ( name ) {
-                destination_info_list.push( order_information.destination_infos[ name ] );
-            } );
-            
-            destination_info_list.sort( function ( a, b ) {
-                return ( a.order_info_list.length < b.order_info_list.length );
-            } );
-            
-            destination_info_list.forEach( function ( destination_info ) {
-                $( '<option />' ).val( destination_info.name ).text( destination_info.name ).appendTo( self.jq_select_destination );
-            } );
-            
-            for ( month_number = 1; month_number <= 12; month_number ++ ) {
-                jq_select_month_option = jq_select_month.children( 'option[value=' + month_number + ']' );
-                
-                if ( month_order_info_lists[ month_number ].length <= 0 ) {
-                    //jq_select_month_option.remove();
-                    if ( jq_select_month_option.is( ':selected' ) ) {
-                        jq_select_month.val( 0 );
+                if ( 500 <= max_page_index ) {
+                    // [メモ] 注文が500件より多い(startIndex>500)と最後のページがわからない
+                    try {
+                        const
+                            test_url = last_page_url.replace( /(?<=[?&]startIndex=)(\d+)/g, '100000' ),
+                            response = await fetch( test_url );
+                        
+                        if ( response.ok ) {
+                            const
+                                jq_html_fragment = get_jq_html_fragment( await response.text() );
+                            
+                            last_page_url = jq_html_fragment.find(is_legacy_page ? 'div.pagination-full ul.a-pagination li.a-normal:last a' : 'div.a-row ul.a-pagination li.a-normal:last a' ).attr( 'href' );
+                            max_page_index = parseInt(last_page_url.match( /[?&]startIndex=(\d+)/ )[ 1 ], 10 );
+                        }
                     }
-                    jq_select_month_option.prop( 'disabled', true ).css( 'background', '#cccccc' );
+                    catch ( error ) {
+                        log_error( error );
+                    }
                 }
-                else {
-                    jq_select_month_option.css( 'background', 'white' );
+                
+                for ( page_index = 0; page_index <= max_page_index; page_index += 10 ) {
+                    order_info_page_url_list.push( last_page_url.replace( /([?&]startIndex=)(\d+)/g, '$1' + page_index ) );
                 }
-            }
-            
-            order_information.is_ready = true;
-            
-            self.jq_select_month.css( 'background', 'transparent' );
-            self.jq_select_month_option_no_select.prop( 'disabled', true ).css( 'background', '#cccccc' );
-            self.jq_select_destination.css( 'opacity', '1' ).prop( 'disabled', false );
-            self.jq_input_text_filter.css( 'opacity', '1' ).prop( 'disabled', false );
-            self.jq_checkbox_text_filter_keywords_ruled_out.prop( 'disabled', false ).parent( 'label' ).css( 'opacity', '1' );
-            self.jq_button_text_filter_apply.prop( 'disabled', false );
-            self.jq_button_text_filter_clear.prop( 'disabled', false );
-            //self.jq_button_print_receipt.prop( 'disabled', false );
-            self.jq_button_print_receipt_digital.prop( 'disabled', false );
-            self.jq_button_print_receipt_nondigital.prop( 'disabled', false );
-            self.jq_counter_container.css( 'color', 'gray' );
-            
-            if ( is_legacy_page ) {
-                $order_page_content_container.find( 'div.pagination-full' ).hide();
             }
             else {
-                $order_page_content_container.find( 'div.a-row' ).filter( function () {
-                    return ( 0 < $( this ).find( 'ul.a-pagination' ).length );
-                } ).hide();
+                order_info_page_url_list.push( last_page_url );
             }
             
-            self.loading_dialog.hide();
+            //self.loading_dialog.show();
+            //self.jq_message.text( '' );
             
-            self.update_order_container();
-        } );
+            self.fetch_all_html( order_info_page_url_list, function ( result ) {
+                log_debug( 'elapsed time:', ( new Date().getTime() - start_ms ) / 1000, 's', result );
+                
+                if ( ! result.success ) {
+                    self.jq_message.text( result.error_message );
+                    self.loading_dialog.hide();
+                    return;
+                }
+                
+                if ( 0 < result.fetch_failure_list.length ) {
+                    var failure_urls_text = result.fetch_failure_list.map( function ( fetch_failure_result ) {
+                            return get_absolute_url( fetch_failure_result.url );
+                        } ).join( '\n' );
+                    
+                    error_button.text( 'Download failure list' ).click( function ( event ) {
+                        download_text( 'download-error-urls.txt', failure_urls_text );
+                    } );
+                    self.jq_message.text( 'Partial download failure' ).append( error_button );
+                }
+                
+                self.analyze_order_information( result.fetch_result_list );
+                
+                if ( ( result.fetch_failure_list.length <= 0 ) && ( 0 < order_information.order_error_urls.length ) ) {
+                    var error_urls_text = order_information.order_error_urls.join( '\n' );
+                    
+                    error_button.text( 'Download error list' ).click( function ( event ) {
+                        download_text( 'order-error-urls.txt', error_urls_text );
+                    } );
+                    self.jq_message.text( 'Partial order error' ).append( error_button );
+                }
+                
+                var destination_infos = order_information.destination_infos,
+                    destination_info_list = [],
+                    month_number = 0,
+                    month_order_info_lists = order_information.month_order_info_lists,
+                    jq_select_month = self.jq_select_month,
+                    jq_select_month_option;
+                
+                Object.keys( order_information.destination_infos ).forEach( function ( name ) {
+                    destination_info_list.push( order_information.destination_infos[ name ] );
+                } );
+                
+                destination_info_list.sort( function ( a, b ) {
+                    return ( a.order_info_list.length < b.order_info_list.length );
+                } );
+                
+                destination_info_list.forEach( function ( destination_info ) {
+                    $( '<option />' ).val( destination_info.name ).text( destination_info.name ).appendTo( self.jq_select_destination );
+                } );
+                
+                for ( month_number = 1; month_number <= 12; month_number ++ ) {
+                    jq_select_month_option = jq_select_month.children( 'option[value=' + month_number + ']' );
+                    
+                    if ( month_order_info_lists[ month_number ].length <= 0 ) {
+                        //jq_select_month_option.remove();
+                        if ( jq_select_month_option.is( ':selected' ) ) {
+                            jq_select_month.val( 0 );
+                        }
+                        jq_select_month_option.prop( 'disabled', true ).css( 'background', '#cccccc' );
+                    }
+                    else {
+                        jq_select_month_option.css( 'background', 'white' );
+                    }
+                }
+                
+                order_information.is_ready = true;
+                
+                self.jq_select_month.css( 'background', 'transparent' );
+                self.jq_select_month_option_no_select.prop( 'disabled', true ).css( 'background', '#cccccc' );
+                self.jq_select_destination.css( 'opacity', '1' ).prop( 'disabled', false );
+                self.jq_input_text_filter.css( 'opacity', '1' ).prop( 'disabled', false );
+                self.jq_checkbox_text_filter_keywords_ruled_out.prop( 'disabled', false ).parent( 'label' ).css( 'opacity', '1' );
+                self.jq_button_text_filter_apply.prop( 'disabled', false );
+                self.jq_button_text_filter_clear.prop( 'disabled', false );
+                //self.jq_button_print_receipt.prop( 'disabled', false );
+                self.jq_button_print_receipt_digital.prop( 'disabled', false );
+                self.jq_button_print_receipt_nondigital.prop( 'disabled', false );
+                self.jq_counter_container.css( 'color', 'gray' );
+                
+                if ( is_legacy_page ) {
+                    $order_page_content_container.find( 'div.pagination-full' ).hide();
+                }
+                else {
+                    $order_page_content_container.find( 'div.a-row' ).filter( function () {
+                        return ( 0 < $( this ).find( 'ul.a-pagination' ).length );
+                    } ).hide();
+                }
+                
+                self.loading_dialog.hide();
+                
+                self.update_order_container();
+            } );
+        } )();
         
         return self;
     },  // end of get_order_information()
@@ -2121,6 +2166,9 @@ var TemplateOrderHistoryFilter = {
                 log_debug( 'encrypted elements found' );
                 use_ajax = false;
             }
+            // TODO: 上記判定がOKでも、取得するページによっては暗号化されるパターンもあるため、厳密にやるためにはuse_ajax=falseにするしかなさそう
+            // ※無理やりuse_ajax=trueでやると、お届け先フィルタが効かなくなるなどの弊害あり
+            use_ajax = false; // うまい方法が見つかるまで常にIFRAMEを使用する方法で（ただし遅い）(2024/02現在)
         } )
         .fail( ( jqXHR, textStatus, errorThrown ) => {
             log_error( '[Fetch Failure]\n', test_url, '\n', jqXHR.status, jqXHR.statusText );
@@ -2133,7 +2181,7 @@ var TemplateOrderHistoryFilter = {
                 
                 _fetch_url = ( url ) => {
                     return new Promise( ( resolve, reject ) => {
-                        var check_timeout = 60000,
+                        var check_timeout = 120000, // [2024/02/06] 6000→120000
                             
                             start_time = Date.now(),
                             
@@ -2316,6 +2364,7 @@ var TemplateOrderHistoryFilter = {
             order_information = self.order_information,
             current_order_info_list = order_information.current_order_info_list,
             order_urls = [],
+            order_detail_urls = [],
             show_print_dialog = true;
         
         current_order_info_list.forEach( function ( order_info ) {
@@ -2330,6 +2379,7 @@ var TemplateOrderHistoryFilter = {
             }
             
             order_urls.push( order_receipt_url );
+            order_detail_urls.push( order_info.order_detail_url );
         } );
         
         if ( order_urls.length <= 0 ) {
@@ -2337,6 +2387,7 @@ var TemplateOrderHistoryFilter = {
         }
         
         order_urls.reverse();
+        order_detail_urls.reverse();
         
         var first_order_url = order_urls.shift();
        
@@ -2350,6 +2401,7 @@ var TemplateOrderHistoryFilter = {
                 target_keyword_is_ruled_out : self.target_keyword_is_ruled_out,
                 first_order_url : first_order_url,
                 additional_order_urls : order_urls,
+                order_detail_urls : order_detail_urls,
                 show_print_dialog : show_print_dialog
             }
         } );
@@ -2414,6 +2466,7 @@ var TemplateReceiptOutputPage = {
         var self = this,
             
             request_order_urls = self.request_order_urls = [ open_parameters.first_order_url ].concat( open_parameters.additional_order_urls ),
+            order_detail_urls = self.order_detail_urls = open_parameters.order_detail_urls,
             display_complete_index = self.display_complete_index = -1,
             max_receipt_number = self.max_receipt_number = request_order_urls.length,
             
@@ -2514,7 +2567,7 @@ var TemplateReceiptOutputPage = {
                 }
             ].concat(
                 // 領収書を IFRAME 経由で取得
-                request_order_urls.map( ( request_order_url, index ) => self.call_by_iframe.bind( self, request_order_url, 1 + index ) )
+                request_order_urls.map( ( request_order_url, index ) => self.call_by_iframe.bind( self, request_order_url, order_detail_urls[ index ], 1 + index ) )
             );
         
         window.concurrent_promise.execute( promise_functions, self.limit_parallel_request_number )
@@ -2637,7 +2690,7 @@ var TemplateReceiptOutputPage = {
     }, // update_display_page_body()
     
     
-    call_by_iframe : function ( request_order_url, receipt_number ) {
+    call_by_iframe : function ( request_order_url, order_detail_url, receipt_number ) {
         var self = this;
         
         return new Promise( ( resolve, reject ) => {
@@ -2647,6 +2700,7 @@ var TemplateReceiptOutputPage = {
                 page_info = self.url_to_page_info[ request_order_url ] = {
                     receipt_number : receipt_number,
                     order_url : request_order_url,
+                    order_detail_url : order_detail_url,
                     resolve : resolve,
                     reject : reject,
                     display_complete : false,
@@ -2682,6 +2736,7 @@ var TemplateReceiptOutputPage = {
                     open_parameters : {
                         first_order_url : self.open_parameters.first_order_url,
                         request_order_url : request_order_url,
+                        order_detail_url : order_detail_url,
                         is_digital : self.open_parameters.is_digital
                     }
                 },
@@ -2905,7 +2960,18 @@ var TemplateReceiptOutputPage = {
             order_parameters = self.get_order_parameters_digital( jq_receipt_body, order_detail_page_info.item_info_list );
         }
         else {
-            order_parameters = self.get_order_parameters_nondigital( jq_receipt_body, order_detail_page_info.item_info_list );
+            if ( 0 < jq_receipt_body.find( '#pos_view_content' ).length ) {
+                order_parameters = self.get_order_parameters_nondigital(
+                    jq_receipt_body,
+                    order_detail_page_info.order_parameters
+                );
+            }
+            else {
+                order_parameters = self.get_order_parameters_nondigital_legacy(
+                    jq_receipt_body,
+                    order_detail_page_info.item_info_list
+                );
+            }
         }
         
         order_parameters.order_detail_page_info = order_detail_page_info;
@@ -3224,7 +3290,56 @@ var TemplateReceiptOutputPage = {
     }, // end of get_order_parameters_digital()
     
     
-    get_order_parameters_nondigital : function ( jq_receipt_body, item_info_list ) {
+    get_order_parameters_nondigital : function ($receipt_body, order_parameters) {
+        // TODO: 基本的には注文詳細画面の情報を使用するが、それだと取得できない情報もある
+        // →やむを得ず、一部情報は領収書画面から取得
+        const
+            self = this,
+            $order_container = $receipt_body.find('#pos_view_content'),
+            $receipt_body_eu_invoice = $receipt_body.find('#eu-invoice');
+        
+        if ( 0 < $receipt_body_eu_invoice.length ) {
+            // [メモ] 以下のような警告が表示されるケース
+            // 「領収書／購入明細書 | 利用可能なお支払明細がありません 理由は？」
+            // ※ https://www.amazon.co.jp/gp/help/customer/display.html/ref=noinvoice_why?ie=UTF8&nodeId=201986650
+            //    へリンクされている
+            order_parameters.error_message = [
+                order_parameters.error_message ?? '',
+                $receipt_body_eu_invoice.parents('td[align="right"]:first').text(),
+                get_absolute_url($receipt_body_eu_invoice.find('a:last').attr('href')),
+            ].join(' ').trim().replace(/\s+/g, ' ');
+        }
+        
+        const
+            order_billing_destination = $receipt_body.find('.displayAddressFullName').text().trim();
+        
+        order_parameters.order_billing_destination = order_billing_destination;
+        
+        if (order_parameters.is_except_page) {
+            // ネットスーパーのページなど
+            if (0 < order_parameters.item_group_list.length) {
+                const
+                    item_group = order_parameters.item_group_list[0],
+                    status = $receipt_body.find('[id="pos_view_section"]:first b.sans center').text().trim(),
+                    status_date = get_formatted_date_string(status),
+                    status_date_ms = status_date ? new Date(status_date).getTime() : 32503680000000;
+                
+                item_group.status = status;
+                item_group.status_date_ms = status_date_ms;
+            }
+            if (0 < order_parameters.card_info_list.length) {
+                const
+                    card_info = order_parameters.card_info_list[0],
+                    card_billing_date = get_formatted_date_string($receipt_body.find('[id="pos_view_section"]:last tr:last').text().split(/:/)[1]);
+                card_info.card_billing_date = card_billing_date;
+            }
+        }
+        
+        return order_parameters;
+    }, // end of get_order_parameters_nondigital()
+    
+    
+    get_order_parameters_nondigital_legacy : function ( jq_receipt_body, item_info_list ) {
         var self = this,
             order_parameters = {},
             order_date = '',
@@ -3608,46 +3723,48 @@ var TemplateReceiptOutputPage = {
         };
         
         return order_parameters;
-    }, // end of get_order_parameters_nondigital()
+    }, // end of get_order_parameters_nondigital_legacy()
     
     
     create_csv_download_button : function ( jq_parent ) {
         var self = this,
             jq_csv_download_button = self.jq_csv_download_button = $( '<button class="noprint"/>' );
         
-        if ((! self.open_parameters.is_digital) && document.querySelector('#pos_view_content')) {
-            jq_csv_download_button
-                .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
-                .attr( 'title', 'ページ構造が大きく変化したため対応できておりません(2024年02月現在)')
-                .text( 'CSVダウンロードはご利用いただけません' )
-                .css( {
-                    'color' : 'red',
-                    'margin' : '4px',
-                    'cursor' : 'pointer'
-                } )
-                .click( function ( event ) {
-                    if (! confirm('現在、適切なCSV内容が取得できない不具合があります。このまま続行しますか？')) {
-                        event.stopPropagation();
-                        event.preventDefault();
-                        return;
-                    }
-                    self.onclick_csv_download_button( event );
-                } )
-                .prependTo( jq_parent );
-        }
-        else {
-            jq_csv_download_button
-                .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
-                .text( OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT )
-                .css( {
-                    'margin' : '4px',
-                    'cursor' : 'pointer'
-                } )
-                .click( function ( event ) {
-                    self.onclick_csv_download_button( event );
-                } )
-                .prependTo( jq_parent );
-        }
+        /*
+        //if ((! self.open_parameters.is_digital) && document.querySelector('#pos_view_content')) {
+        //    jq_csv_download_button
+        //        .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
+        //        .attr( 'title', 'ページ構造が大きく変化したため対応できておりません(2024年02月現在)')
+        //        .text( 'CSVダウンロードはご利用いただけません' )
+        //        .css( {
+        //            'color' : 'red',
+        //            'margin' : '4px',
+        //            'cursor' : 'pointer'
+        //        } )
+        //        .click( function ( event ) {
+        //            if (! confirm('現在、適切なCSV内容が取得できない不具合があります。このまま続行しますか？')) {
+        //                event.stopPropagation();
+        //                event.preventDefault();
+        //                return;
+        //            }
+        //            self.onclick_csv_download_button( event );
+        //        } )
+        //        .prependTo( jq_parent );
+        //    return self;
+        //}
+        */
+        
+        jq_csv_download_button
+            .attr( 'id', SCRIPT_NAME + '-csv-download-button' )
+            .text( OPTIONS.CSV_DOWNLOAD_BUTTON_TEXT )
+            .css( {
+                'margin' : '4px',
+                'cursor' : 'pointer'
+            } )
+            .click( function ( event ) {
+                self.onclick_csv_download_button( event );
+            } )
+            .prependTo( jq_parent );
         return self;
     }, // end of create_csv_download_button()
     
@@ -4362,7 +4479,9 @@ function init_order_page_in_iframe( open_parameters ) {
         return;
     }
     
-    var order_detail_url = get_absolute_url( $( 'body > center:eq(-1) p > a, #pos_view_content a[href*="/edit.html"][href*="orderID"]' ).attr( 'href' ) ),
+    var order_detail_url = get_absolute_url( open_parameters.order_detail_url ),
+        //order_detail_url = get_absolute_url( $( 'body > center:eq(-1) p > a, #pos_view_content a[href*="/edit.html"][href*="orderID"]' ).attr( 'href' ) ),
+        
         order_detail_page_info = null,
         rendering_result = null,
         
@@ -4482,7 +4601,591 @@ function init_order_page_in_iframe( open_parameters ) {
             } );
             
             return item_info_list;
-        }, // end of get_item_info_nondigital()
+        }, // end of get_item_info_list_nondigital()
+        
+        
+        get_order_parameters_nondigital_from_order_detail_page = function ($html_fragment) {
+            const
+                $orderDetails = $html_fragment.find('#orderDetails');
+            
+            if ($orderDetails.length < 1) {
+                // [メモ] ネットスーパー(ライフ)等のページ構造は全く異なるため、別処理で行う
+                return get_order_parameters_nondigital_from_except_order_detail_page($html_fragment);
+            }
+            
+            const
+                $subtotals = $orderDetails.find('#od-subtotals');
+            
+            if ($subtotals.length < 1) {
+                return get_order_parameters_nondigital_from_giftcard_order_detail_page($html_fragment);
+            }
+            
+            const
+                $order_date_invoice_items = $orderDetails.find('.order-date-invoice-item'),
+                $shipping_address_container = $orderDetails.find('.od-shipping-address-container'),
+                $payments_instrument_list = $orderDetails.find('.pmts-payments-instrument-list'),
+                $transaction_history = $orderDetails.find('.a-expander-container').filter(function () {
+                    return (/取引履歴/.test($(this).find('.a-expander-prompt').text().trim()));
+                }).find('> .a-expander-inner'),
+                $shipments = $orderDetails.find('.od-shipments');
+            
+            const
+                order_url = order_detail_url,
+                receipt_url = get_absolute_url(open_parameters.request_order_url),
+                item_group_list = [],
+                payment_method_list = [],
+                payment_info_list = [];
+            
+            let order_date = '',
+                order_id = '',
+                order_subtotal_price = '',
+                order_total_price = '',
+                order_billing_destination = '',
+                order_billing_amount = '',
+                common_shipping_destination = '',
+                card_info_list = [],
+                error_message = '';
+            
+            order_date = get_formatted_date_string($order_date_invoice_items.eq(0).text()),
+            order_id = get_child_text_from_jq_element($order_date_invoice_items.eq(1).find('bdi')),
+            
+            $subtotals.children('.a-row').each(function () {
+                const
+                    $a_row = $(this),
+                    $text_left = $a_row.find('.a-text-left'),
+                    $text_right = $a_row.find('.a-text-right.a-span-last');
+                
+                if (($text_left.length < 1) || ($text_right.length < 1)) {
+                    return;
+                }
+                
+                const
+                    name = $text_left.text().replace(/[:：]/g, '').trim(),
+                    price = get_price_number($text_right.text());
+                
+                if (/商品の小計/.test(name)) {
+                    order_subtotal_price = price;
+                    return;
+                }
+                if (/注文合計/.test(name)) {
+                    order_total_price = price;
+                    return;
+                }
+                if (/請求額/.test(name)) {
+                    order_billing_amount = price;
+                    return;
+                }
+                payment_info_list.push( {
+                    header: name,
+                    price: price,
+                } );
+            });
+            
+            common_shipping_destination = get_child_text_from_jq_element($shipping_address_container.find('.displayAddressFullName'));
+            
+            $payments_instrument_list.find('.pmts-payments-instrument-detail-box-paystationpaymentmethod > .a-list-item').each( function () {
+                const
+                    $payments_instrument_detail_item = $(this);
+                
+                payment_method_list.push($join_child_text($payments_instrument_detail_item));
+            });
+            
+            let
+                collation_billing_amount = get_price_number($transaction_history.text().replace(/\s+/g, ' ').split(/合計\s*[:：]/)[1]),
+                work_billing_amount = 0;
+            
+            if (collation_billing_amount === '') {
+                log_info(`[${order_id}] collation_billing_amount is not found`);
+                collation_billing_amount = order_billing_amount;
+            }
+            
+            $transaction_history.find('> .a-row').each(function (list_index) {
+                const
+                    $a_row = $(this),
+                    status = $a_row.find('> .a-color-secondary').text().replace(/[:：]/g, '').trim(),
+                    info = $a_row.find('> span:last').text().trim(),
+                    [date_text, payment_info] = info.split(/-/, 2),
+                    [card_type, amount_text] = payment_info.split(/[:：]/, 2),
+                    card_billing_amount = get_price_number(amount_text);
+                
+                if ((card_billing_amount === '')) {
+                    return;
+                }
+                work_billing_amount += card_billing_amount;
+                
+                const
+                    card_billing_date = get_formatted_date_string(date_text);
+                
+                card_info_list.push({
+                    card_type: card_type.trim(),
+                    card_billing_date,
+                    card_billing_amount,
+                    card_billing_date_ms: (card_billing_date ? new Date(card_billing_date).getTime() : 32503680000000) + 23*3600000 + list_index,
+                });
+            });
+            
+            card_info_list.sort((a, b) => a.card_billing_date_ms - b.card_billing_date_ms);
+            
+            if (work_billing_amount != collation_billing_amount) {
+                // TODO: 取引履歴に同じ取引が複数回表示される場合がある（合計と一致しない）
+                // → Amazon.co.jp側の問題なので、拡張機能側では対応困難
+                //   ※日付が一番新しいものが怪しい(余分に追加されている)ことが多いように思われるが、確証がない
+                log_error(`[${order_id}] billing amount unmatch: ${work_billing_amount} != ${collation_billing_amount}`);
+                log_info('card_info_list', JSON.stringify(card_info_list, null, 4));
+                
+                // [メモ] 余分なものを除去する試み（保留中）
+                /*
+                //work_billing_amount = 0;
+                //card_info_list = card_info_list.reduce((work_list, card_info) => {
+                //    work_billing_amount += card_info.card_billing_amount;
+                //    if (work_billing_amount <= collation_billing_amount) {
+                //        work_list.push(card_info);
+                //    }
+                //    return work_list;
+                //}, []);
+                */
+            }
+            
+            ((0 < $shipments.length) ? $shipments.children('.shipment') : $orderDetails.find('.shipment')).each(function (list_index) {
+                const
+                    $shipment = $(this),
+                    $order_info_left = $shipment.find('.a-col-left');
+                
+                const
+                    item_list = [],
+                    gift_token_info_list = [],
+                    other_price_info_list = [],
+                    card_info = {
+                        card_type : '',
+                        card_billing_date : '',
+                        card_billing_amount : '',
+                    },
+                    status = $shipment.find('.js-shipment-info-container').text().trim(),
+                    status_date = get_formatted_date_string(status),
+                    status_date_ms = (status_date ? new Date(status_date).getTime() : 32503680000000) + list_index;
+                
+                let is_gift_token = false,
+                    subtotal_price = 0,
+                    total_price = 0,
+                    billing_amount = 0,
+                    destination = common_shipping_destination;
+                
+                $order_info_left.find('.a-fixed-left-grid').each(function () {
+                    const
+                        remark_list = [];
+                    
+                    let name = '',
+                        url = '',
+                        remarks = '',
+                        price = 0,
+                        number = 1;
+                    
+                    const
+                        $order_info = $(this),
+                        $quantity = $order_info.find('.item-view-left-col-inner .item-view-qty'),
+                        $yohtmlc = $order_info.find('.yohtmlc-item');
+                    
+                    if (0 < $quantity.length) {
+                        number = parseInt($quantity.text().trim(), 10);
+                    }
+                    
+                    $yohtmlc.children('.a-row').each(function () {
+                        const
+                            $a_row = $(this);
+                        
+                        if (0 < $a_row.find('[role="button"]').length) {
+                            return;
+                        }
+                        
+                        const
+                            $product_link = $a_row.find('a.a-link-normal[href*="/product/"]');
+                        
+                        if (0 < $product_link.length) {
+                            name = $product_link.text().trim();
+                            url = get_absolute_url($product_link.attr('href'));
+                            return;
+                        }
+                        
+                        if (0 < price) {
+                            // TODO: ギフトラッピング等の金額が商品価格の後に現れる場合がある
+                            // →ラッピング価格等は$subtotals以下にも出ているのでとりあえず無視する(要検討)
+                            return;
+                        }
+                        
+                        const
+                            $price = $a_row.find('.a-color-price');
+                        
+                        if (0 < $price.length) {
+                            price = get_price_number($price.text());
+                            return;
+                        }
+                        
+                        remark_list.push($a_row.text().trim().replace(/\s+/, ' '));
+                    });
+                    
+                    subtotal_price += price * number;
+                    
+                    remarks = remark_list.join(' ').trim();
+                    
+                    item_list.push({
+                        name,
+                        url,
+                        remarks,
+                        price,
+                        number,
+                        status,
+                    });
+                });
+                
+                item_group_list.push({
+                    is_gift_token,
+                    subtotal_price,
+                    total_price,
+                    destination,
+                    billing_amount,
+                    status,
+                    status_date_ms,
+                    card_info,
+                    item_list,
+                    gift_token_info_list,
+                    other_price_info_list,
+                });
+            });
+            
+            item_group_list.sort((a, b) => a.status_date_ms - b.status_date_ms);
+            
+            const
+                order_parameters = {
+                    is_except_page : false,
+                    order_date,
+                    order_id,
+                    item_group_list,
+                    order_subtotal_price,
+                    order_total_price,
+                    order_billing_destination,
+                    order_billing_amount,
+                    order_url,
+                    receipt_url,
+                    card_info_list,
+                    payment_method_list,
+                    payment_info_list,
+                    error_message,
+                };
+            
+            return order_parameters;
+        }, // get_order_parameters_nondigital_from_order_detail_page()
+        
+        
+        get_order_parameters_nondigital_from_giftcard_order_detail_page = function ($html_fragment) {
+            const
+                $orderDetails = $html_fragment.find('#orderDetails'),
+                $order_date_invoice_items = $orderDetails.find('.order-date-invoice-item'),
+                $summary_container = $orderDetails.find('.a-box-group.a-spacing-base'),
+                $subtotals = $summary_container.find('.a-fixed-right-grid-col.a-col-right').filter(function () {
+                    return /領収書/.test($(this).children('h5.a-text-left').text());
+                }),
+                $payments_instrument_list = $summary_container.find('.pmts-payments-instrument-list'),
+                $shipments = $orderDetails.children('.a-box').filter(function () {
+                    return (0 < $(this).find('.js-shipment-info-container').length);
+                });
+            
+            const
+                order_url = order_detail_url,
+                receipt_url = get_absolute_url(open_parameters.request_order_url),
+                item_group_list = [],
+                payment_method_list = [],
+                payment_info_list = [];
+            
+            let order_date = '',
+                order_id = '',
+                order_subtotal_price = '',
+                order_total_price = '',
+                order_billing_destination = '',
+                order_billing_amount = '',
+                card_info_list = [],
+                error_message = '';
+            
+            order_date = get_formatted_date_string($order_date_invoice_items.eq(0).text()),
+            order_id = get_child_text_from_jq_element($order_date_invoice_items.eq(1).find('bdi')),
+            
+            $subtotals.children('.a-row').each(function () {
+                const
+                    $a_row = $(this),
+                    $text_left = $a_row.find('.a-text-left'),
+                    $text_right = $a_row.find('.a-text-right.a-span-last');
+                
+                if (($text_left.length < 1) || ($text_right.length < 1)) {
+                    return;
+                }
+                
+                const
+                    name = $text_left.text().replace(/[:：]/g, '').trim(),
+                    price = get_price_number($text_right.text());
+                
+                if (/商品の小計/.test(name)) {
+                    order_subtotal_price = price;
+                    return;
+                }
+                if (/注文合計/.test(name)) {
+                    order_total_price = price;
+                    return;
+                }
+                if (/請求額/.test(name)) {
+                    order_billing_amount = price;
+                    return;
+                }
+                payment_info_list.push( {
+                    header: name,
+                    price: price,
+                } );
+            });
+            
+            $payments_instrument_list.find('.pmts-payments-instrument-detail-box-paystationpaymentmethod > .a-list-item').each( function () {
+                const
+                    $payments_instrument_detail_item = $(this);
+                
+                payment_method_list.push($join_child_text($payments_instrument_detail_item));
+            });
+            
+            $shipments.each(function (list_index) {
+                const
+                    $shipment = $(this),
+                    $yohtmlc = $shipment.find('.yohtmlc-item'),
+                    $yohtmlc_rows = $yohtmlc.children('.a-row'),
+                    $product_link = $yohtmlc.find('a.a-link-normal[href*="/product/"]'),
+                    $message_row = (2 < $yohtmlc_rows.length) ? $yohtmlc_rows.eq(1) : $(),
+                    $gift_list_row = $yohtmlc_rows.eq(-1);
+                
+                const
+                    item_list = [],
+                    gift_token_info_list = [],
+                    other_price_info_list = [],
+                    card_info = {
+                        card_type : payment_method_list.join('、'), // TODO: 支払い方法が複数あった場合には特定不可
+                        card_billing_date : '',
+                        card_billing_amount : order_billing_amount,
+                    },
+                    status = $shipment.find('.js-shipment-info-container').text().trim(),
+                    status_date = '',
+                    status_date_ms = 32503680000000 + list_index,
+                    product_name = $product_link.text().trim(),
+                    product_url = get_absolute_url($product_link.attr('href')),
+                    message = $message_row.text().replace(/\s+/g, ' ').trim();
+                
+                let is_gift_token = true,
+                    subtotal_price = 0,
+                    total_price = 0,
+                    billing_amount = 0,
+                    destination = '';
+                
+                $gift_list_row.find('.gift-card-instance').each(function () {
+                    const
+                        $gift_card_instance = $(this),
+                        price = get_price_number($gift_card_instance.children('.a-span2').text()),
+                        destination = $gift_card_instance.children('.recipient').text().trim(),
+                        status = $gift_card_instance.children('.a-span5.a-span-last').text().trim();
+                    
+                    gift_token_info_list.push({
+                        name: product_name,
+                        remarks: message,
+                        price,
+                        number: 1,
+                        status,
+                        destination,
+                        url: product_url,
+                    });
+                });
+                
+                item_group_list.push({
+                    is_gift_token,
+                    subtotal_price,
+                    total_price,
+                    destination,
+                    billing_amount,
+                    status,
+                    status_date_ms,
+                    card_info,
+                    item_list,
+                    gift_token_info_list,
+                    other_price_info_list,
+                });
+            });
+            
+            const
+                order_parameters = {
+                    is_except_page : false,
+                    order_date,
+                    order_id,
+                    item_group_list,
+                    order_subtotal_price,
+                    order_total_price,
+                    order_billing_destination,
+                    order_billing_amount,
+                    order_url,
+                    receipt_url,
+                    card_info_list,
+                    payment_method_list,
+                    payment_info_list,
+                    error_message,
+                };
+            
+            return order_parameters;
+        }, // get_order_parameters_nondigital_from_giftcard_order_detail_page()
+        
+        
+        get_order_parameters_nondigital_from_except_order_detail_page = function ($html_fragment) {
+            const
+                $order_summary = $html_fragment.find('#order-summary'),
+                $delivery_destination = $html_fragment.find('#delivery-destination'),
+                $line_items = $html_fragment.find('#line-items'),
+                $item_list = $html_fragment.find('#item-list-page');
+            
+            const
+                order_url = order_detail_url,
+                receipt_url = get_absolute_url( open_parameters.request_order_url ),
+                item_group_list = [],
+                payment_method_list = [],
+                payment_info_list = [];
+            
+            let order_date = '',
+                order_id = '',
+                order_subtotal_price = '',
+                order_total_price = '',
+                order_billing_destination = '',
+                order_billing_amount = '',
+                common_shipping_destination = '',
+                card_info_list = [],
+                error_message = '';
+            
+            const
+                $order_date_items = $order_summary.children('.a-row').eq(1).find('.a-color-tertiary');
+            
+            order_id = ($order_date_items.eq(0).text().split(/[:：]/)[1] ?? '').trim();
+            order_date = get_formatted_date_string($order_date_items.eq(1).text());
+            
+            common_shipping_destination = $delivery_destination.children('.a-row').eq(1).children('.a-size-base').contents().eq(0).text().trim();
+            
+            order_subtotal_price = get_price_number($order_summary.find('#ufpo-itemsSubtotal-amount').text());
+            order_total_price = get_price_number($order_summary.find('#ufpo-total-amount').text());
+            order_billing_amount = get_price_number($order_summary.find('#ufpo-grand-total-amount').text());
+            payment_info_list.push({
+                header: $order_summary.find('#ufpo-shippingTaxInclusive-label').text().trim().replace(/[:：]/g, ''),
+                price: get_price_number($order_summary.find('#ufpo-shippingTaxInclusive-amount').text()),
+            });
+            
+            $order_summary.find('.pmts-payments-instrument-list > .pmts-payments-instrument-detail-box-paystationpaymentmethod > .a-list-item').each(function (list_index) {
+                const
+                    $item = $(this),
+                    card_type = $join_child_text($item);
+                
+                payment_method_list.push(card_type);
+                
+                card_info_list.push({
+                    card_type,
+                    card_billing_date: '', // TODO: 取得できない
+                    card_billing_amount: order_billing_amount,
+                    card_billing_date_ms: 32503680000000 + 23*3600000 + list_index,
+                });
+            });
+            
+            card_info_list.sort((a, b) => a.card_billing_date_ms - b.card_billing_date_ms);
+            
+            order_billing_destination = $order_summary.find('.pmts-billing-address-fullname > .a-list-item').text().trim();
+            {
+                const
+                    item_list = [],
+                    gift_token_info_list = [],
+                    other_price_info_list = [],
+                    card_info = {
+                        card_type : '',
+                        card_billing_date : '',
+                        card_billing_amount : '',
+                    },
+                    status = '',
+                    status_date = '',
+                    status_date_ms = (status_date ? new Date(status_date).getTime() : 32503680000000);
+                
+                let is_gift_token = false,
+                    subtotal_price = 0,
+                    total_price = 0,
+                    billing_amount = 0,
+                    destination = common_shipping_destination;
+                
+                $item_list.find('[id$="-item-grid-row"]').each(function () {
+                    const
+                        remark_list = [];
+                    
+                    let name = '',
+                        url = '',
+                        remarks = '',
+                        price = 0,
+                        number = 1;
+                    
+                    const
+                        $item = $(this),
+                        $product_link = $item.find('a.a-link-normal[href*="/product/"]'),
+                        number_string = $item.find('.a-column.a-span1').text().trim();
+                    
+                    name = $product_link.find('span').text().trim();
+                    url = get_absolute_url($product_link.attr('href'));
+                    let mult_price = get_price_number($item.find('[id$="-item-total-price"]').text()); // [メモ] 合計であることに注意
+                    price = Math.ceil(mult_price / 2);
+                    
+                    if (/^\d+$/.test(number_string)) {
+                        number = parseInt(number_string, 10);
+                    }
+                    subtotal_price += mult_price;
+                    
+                    remark_list.push($join_child_text($item.find('.ufpo-item-weight-column')));
+                    remark_list.push($item.find('.ufpo-item-status-column.a-span-last .ufpo-item-status .a-box-inner').text().trim());
+                    remarks = remark_list.join(' ').trim();
+                    
+                    item_list.push({
+                        name,
+                        url,
+                        remarks,
+                        price,
+                        number,
+                        status,
+                    });
+                });
+                
+                item_group_list.push({
+                    is_gift_token,
+                    subtotal_price,
+                    total_price,
+                    destination,
+                    billing_amount,
+                    status,
+                    status_date_ms,
+                    card_info,
+                    item_list,
+                    gift_token_info_list,
+                    other_price_info_list,
+                });
+            }
+            
+            const
+                order_parameters = {
+                    is_except_page : true, // TODO: ページ内で拾えない情報がある(特に発送状態、請求日)
+                    order_date,
+                    order_id,
+                    item_group_list,
+                    order_subtotal_price,
+                    order_total_price,
+                    order_billing_destination,
+                    order_billing_amount,
+                    order_url,
+                    receipt_url,
+                    card_info_list,
+                    payment_method_list,
+                    payment_info_list,
+                    error_message,
+                };
+            
+            return order_parameters;
+        }, // get_order_parameters_nondigital_from_except_order_detail_page()
+        
         
         finish = function () {
             if ( ( ! order_detail_page_info ) || ( ! rendering_result ) ) {
@@ -4529,14 +5232,16 @@ function init_order_page_in_iframe( open_parameters ) {
         .done( function ( html ) {
             var jq_html_fragment = get_jq_html_fragment( html ),
                 refund_info = ( open_parameters.is_digital ) ? get_refund_info_digital( jq_html_fragment ) : get_refund_info_nondigital( jq_html_fragment ),
-                item_info_list = ( open_parameters.is_digital ) ? get_item_info_list_digital( jq_html_fragment ) : get_item_info_list_nondigital( jq_html_fragment );
+                item_info_list = ( open_parameters.is_digital ) ? get_item_info_list_digital( jq_html_fragment ) : get_item_info_list_nondigital( jq_html_fragment ),
+                order_parameters = ( open_parameters.is_digital ) ? null : get_order_parameters_nondigital_from_order_detail_page( jq_html_fragment );
             
             order_detail_page_info = {
                 url : order_detail_url,
                 success : true,
                 //html : html,
                 refund_info : refund_info,
-                item_info_list : item_info_list
+                item_info_list : item_info_list,
+                order_parameters : order_parameters,
             };
             
             finish();
