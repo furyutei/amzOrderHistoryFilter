@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.1.0
+// @version         0.1.1.1
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -2368,7 +2368,7 @@ var TemplateOrderHistoryFilter = {
             show_print_dialog = true;
         
         current_order_info_list.forEach( function ( order_info ) {
-            var order_receipt_url = order_info.order_receipt_url;
+            var order_receipt_url = ( is_digital ) ? "https://www.amazon.co.jp/gp/digital/your-account/order-summary.html/?print=1&orderID=" + order_info.order_id : "https://www.amazon.co.jp/gp/css/summary/print.html/?orderID=" + order_info.order_id;
             
             if ( ! order_receipt_url ) {
                 return;
