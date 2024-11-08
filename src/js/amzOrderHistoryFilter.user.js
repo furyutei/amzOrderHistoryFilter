@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.1.0
+// @version         0.1.2.0
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -4695,8 +4695,9 @@ function init_order_page_in_iframe( open_parameters ) {
                 work_billing_amount = 0;
             
             if (collation_billing_amount === '') {
-                log_info(`[${order_id}] collation_billing_amount is not found`);
-                collation_billing_amount = order_billing_amount;
+                //log_info(`[${order_id}] collation_billing_amount is not found`); // [メモ] collation_billing_amountが無い：予約や搬送中、合計￥0注文などでこうなるので、基本的には異常ではない模様
+                //collation_billing_amount = order_billing_amount;
+                collation_billing_amount = 0;
             }
             
             $transaction_history.find('> .a-row').each(function (list_index) {
@@ -4726,14 +4727,17 @@ function init_order_page_in_iframe( open_parameters ) {
             
             card_info_list.sort((a, b) => a.card_billing_date_ms - b.card_billing_date_ms);
             
-            if (work_billing_amount != collation_billing_amount) {
-                // TODO: 取引履歴に同じ取引が複数回表示される場合がある（合計と一致しない）
+            if (collation_billing_amount && (work_billing_amount != collation_billing_amount)) {
+                // TODO: 取引履歴に同じ取引が複数回表示される場合がある模様（→合計と一致しなくなる）
                 // → Amazon.co.jp側の問題なので、拡張機能側では対応困難
-                //   ※日付が一番新しいものが怪しい(余分に追加されている)ことが多いように思われるが、確証がない
+                //   ※日付が一番新しいものが怪しい(余分に追加されている)ことが多いように思われるが、確証がない→必ずしもそうとは変わらないようで、自動で補正することは困難（2024/02/07）
                 log_error(`[${order_id}] billing amount unmatch: ${work_billing_amount} != ${collation_billing_amount}`);
                 log_info('card_info_list', JSON.stringify(card_info_list, null, 4));
                 
                 // [メモ] 余分なものを除去する試み（保留中）
+                // アイデアとしては
+                // - 合計が超えたらそれ以降は除去→不正な複製データが最初に出てきたらダメ
+                // - 同じ金額が複数回出てきたら除去→同じ金額かつ正しいデータの場合に対応できないのでダメ
                 /*
                 //work_billing_amount = 0;
                 //card_info_list = card_info_list.reduce((work_list, card_info) => {
