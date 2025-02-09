@@ -280,6 +280,10 @@ function get_absolute_url( path, base_url ) {
         base_url = window.location.href;
     }
     
+    if ( ! path ) {
+        return '';
+    }
+    
     try {
         return new URL( path, base_url ).href;
     }
@@ -2536,7 +2540,7 @@ var TemplateReceiptOutputPage = {
     
     csv_header_columns : [ "注文日", "注文番号", "商品名", "付帯情報", "価格", "個数", "商品小計", "注文合計", "お届け先", "状態", "請求先", "請求額", "クレカ請求日", "クレカ請求額", "クレカ種類", "注文概要URL", "領収書URL", "商品URL" ],
     
-    refund_csv_header_columns : [ "注文日", "注文番号", "返金日", "返金額", "返金先", "クレカ種類", "備考", "注文概要URL", "領収書URL", "返金通知書URL" ],
+    refund_csv_header_columns : [ "注文日", "注文番号", "返金日", "返金額", "返金先", "クレカ種類", "備考", "注文概要URL", "領収書URL", "返金明細書URL" ],
     
     
     init : function ( open_parameters ) {
@@ -3613,7 +3617,8 @@ var TemplateReceiptOutputPage = {
                 card_info.card_billing_amount = order_billing_amount;
                 
                 if ( 0 < payment_method_list.length ) {
-                    card_info.card_type = payment_method_list[ 0 ];
+                    //card_info.card_type = payment_method_list[ 0 ];
+                    card_info.card_type = payment_method_list.join('、');
                 }
                 
                 jq_order_summary_items = jq_order_summary_content.children( 'tr:eq(1)' ).find( 'table:eq(0) td:eq(0) table:gt(0)' );
@@ -4108,13 +4113,18 @@ var TemplateReceiptOutputPage = {
                     current_card_info_index = 0,
                     current_card_info;
                 
-                order_parameters.card_info_list.forEach( ( card_info ) => {
-                    card_type_map[ card_info.card_type ] = card_info.card_type;
-                    card_billing_amount += card_info.card_billing_amount || 0;
-                } );
-                
-                card_type = Object.keys( card_type_map ).join( ', ' );
-                
+                if (0 < order_parameters.card_info_list.length) {
+                    order_parameters.card_info_list.forEach( ( card_info ) => {
+                        card_type_map[ card_info.card_type ] = card_info.card_type;
+                        card_billing_amount += card_info.card_billing_amount || 0;
+                    } );
+                    
+                    card_type = Object.keys( card_type_map ).join( '、' );
+                }
+                else {
+                    card_type = order_parameters.payment_method_list.join('、');
+                    // TODO: 気付いたら取引履歴が記載されなくなっていたので、カード明細もわからない(2024/11)
+                }
                 csv_lines.push( self.create_csv_line( [
                     order_parameters.order_date, // 注文日
                     order_parameters.order_id, // 注文番号
@@ -4174,7 +4184,7 @@ var TemplateReceiptOutputPage = {
                             item.remarks, // 付帯情報
                             item.price, // 価格
                             item.number, // 個数
-                            ( item_index == 0 ) ? item_group.subtotal_price : '', // 商品小計
+                            ( item_index == 0 ) ? item_group.subtotal_price : '', // 商品小計 // TODO: 発送毎の小計になるので不自然に見えるかも？単純に(item.price*item.number)の方がわかりやすいか？
                             /*
                             // 2019.10: 発送毎の明細が記載されなくなった
                             //( item_index == 0 ) ? item_group.total_price : '', // 注文合計(送料・手数料含む)
@@ -4344,7 +4354,8 @@ var TemplateReceiptOutputPage = {
             }
             else {
                 if ( 0 < order_parameters.payment_method_list.length ) {
-                    card_type = order_parameters.payment_method_list[ 0 ];
+                    //card_type = order_parameters.payment_method_list[ 0 ];
+                    card_type = order_parameters.payment_method_list.join('、');
                 }
             }
             
@@ -4359,7 +4370,7 @@ var TemplateReceiptOutputPage = {
                     refund.remarks, // 備考
                     order_parameters.order_url, // 注文概要URL
                     order_parameters.receipt_url, // 領収書URL
-                    refund_info.refund_invoice_url // 返金通知書URL
+                    refund_info.refund_invoice_url // 返金明細書URL
                 ] ) );
             } );
         } );
@@ -4574,6 +4585,10 @@ function init_order_page_in_iframe( open_parameters ) {
             finish();
         },
         
+        get_refund_invoice_url = function ( $invoceLinksList ) {
+            return get_absolute_url( $invoceLinksList.find('li .a-link-normal:contains("返金明細書")').first().attr('href') );
+        },
+        
         get_refund_info_digital = function ( jq_html_fragment ) {
             var refund_list = [],
                 refund_info = {
@@ -4697,6 +4712,8 @@ function init_order_page_in_iframe( open_parameters ) {
             }
             
             const
+                $orderSummay = $orderDetails.find('[data-component="orderSummary"]'),
+                // [メモ] お届け先住所・支払い方法・領収書/購入明細書が含まれる要素は今のところ[data-component="orderSummary"]だけのようだが、例外もあるかも知れないため、以下ではもっと下の要素セレクタで検索している
                 $subtotals = (() => {
                     const
                         $subtotals = $orderDetails.find('#od-subtotals'),
@@ -4710,13 +4727,27 @@ function init_order_page_in_iframe( open_parameters ) {
             }
             
             const
-                $order_date_invoice_items = $orderDetails.find('.order-date-invoice-item'),
+                $orderDateInvoice = $orderDetails.find('[data-component="orderDateInvoice"]'),
+                $briefOrderInfoInvoice = $orderDetails.find('[data-component="briefOrderInfoInvoice"]');
+                // [メモ] 注文日・注文番号・領収書等が含まれる要素は、[data-component="orderDateInvoice"]と[data-component="briefOrderInfoInvoice"]の少なくとも二つは存在し、かつ、中身の構造も異なっている
+
+            const
                 $shipping_address_container = $orderDetails.find('.od-shipping-address-container'),
                 $payments_instrument_list = $orderDetails.find('.pmts-payments-instrument-list'),
                 $transaction_history = $orderDetails.find('.a-expander-container').filter(function () {
                     return (/取引履歴/.test($(this).find('.a-expander-prompt').text().trim()));
-                }).find('> .a-expander-inner'),
-                $shipments = $orderDetails.find('.od-shipments');
+                }).find('> .a-expander-inner'), // TODO: 気付いたら取引履歴が記載されなくなっていた(2024/11)
+                $shipments = (() => {
+                    let $shipments = $orderDetails.find('.od-shipments').children('.shipment');
+                    if (0 < $shipments.length) {
+                        return $shipments;
+                    }
+                    $shipments = $orderDetails.find('.shipment');
+                    if (0 < $shipments.length) {
+                        return $shipments;
+                    }
+                    return $orderDetails.find('[data-component="orderCard"] > [data-component="shipments"] > .a-box-group > .a-box');
+                })();
             
             const
                 order_url = order_detail_url,
@@ -4731,12 +4762,52 @@ function init_order_page_in_iframe( open_parameters ) {
                 order_total_price = '',
                 order_billing_destination = '',
                 order_billing_amount = '',
+                order_refund_amount = '',
+                order_refund_invoice_url = '',
+                order_invoice_links_request_url = '',
                 common_shipping_destination = '',
                 card_info_list = [],
                 error_message = '';
             
-            order_date = get_formatted_date_string($order_date_invoice_items.eq(0).text()),
-            order_id = get_child_text_from_jq_element($order_date_invoice_items.eq(1).find('bdi')),
+            if (0 < $orderDateInvoice.get(0).children.length) {
+                const
+                    $order_date_invoice_items = $orderDetails.find('.order-date-invoice-item');
+                order_date = get_formatted_date_string($order_date_invoice_items.eq(0).text());
+                order_id = get_child_text_from_jq_element($order_date_invoice_items.eq(1).find('bdi'));
+                order_refund_invoice_url = get_refund_invoice_url($orderDateInvoice.find('#a-popover-invoiceLinks ul'));
+            }
+            else if (0 < $briefOrderInfoInvoice.get(0).children.length) {
+                const
+                    $date_orderid_info = $briefOrderInfoInvoice.find('[data-component="briefOrderInfo"] .a-icon-text-separator').parent();
+                
+                $date_orderid_info.contents().each(function(){
+                    if (this.nodeType != 3) {
+                        return;
+                    }
+                    const
+                        work_text = this.nodeValue;
+                    
+                    if (order_date === '') {
+                        order_date = get_formatted_date_string(work_text);
+                    }
+                    else if (order_id === '') {
+                        order_id = work_text.match(/[\d\-]+/)[0] ?? '';
+                    }
+                });
+                
+                order_invoice_links_request_url = (() => {
+                    try {
+                        return get_absolute_url(JSON.parse($briefOrderInfoInvoice.find('[data-component="orderInvoice"] .a-declarative').attr('data-a-popover')).url);
+                    }
+                    catch (error) {
+                        log_error(error);
+                        return '';
+                    }
+                })();
+            }
+            else {
+                log_error('(*) unknown format: order_date/order_id not found');
+            }
             
             $subtotals.children('.a-row').each(function () {
                 const
@@ -4764,6 +4835,10 @@ function init_order_page_in_iframe( open_parameters ) {
                     order_billing_amount = price;
                     return;
                 }
+                if (/返金額の合計/.test(name)) {
+                    order_refund_amount = price;
+                    return;
+                }
                 payment_info_list.push( {
                     header: name,
                     price: price,
@@ -4779,6 +4854,7 @@ function init_order_page_in_iframe( open_parameters ) {
                 payment_method_list.push($join_child_text($payments_instrument_detail_item));
             });
             
+            // TODO: 気付いたら取引履歴が記載されなくなっていたため、カードの支払い明細等が取得できなくなってしまった(2024/11)
             let
                 collation_billing_amount = get_price_number($transaction_history.text().replace(/\s+/g, ' ').split(/合計\s*[:：]/)[1]),
                 work_billing_amount = 0;
@@ -4839,110 +4915,255 @@ function init_order_page_in_iframe( open_parameters ) {
                 */
             }
             
-            ((0 < $shipments.length) ? $shipments.children('.shipment') : $orderDetails.find('.shipment')).each(function (list_index) {
-                const
-                    $shipment = $(this),
-                    $order_info_left = $shipment.find('.a-col-left');
-                
-                const
-                    item_list = [],
-                    gift_token_info_list = [],
-                    other_price_info_list = [],
-                    card_info = {
-                        card_type : '',
-                        card_billing_date : '',
-                        card_billing_amount : '',
-                    },
-                    status = $shipment.find('.js-shipment-info-container').text().trim(),
-                    status_date = get_formatted_date_string(status),
-                    status_date_ms = (status_date ? new Date(status_date).getTime() : 32503680000000) + list_index;
-                
-                let is_gift_token = false,
-                    subtotal_price = 0,
-                    total_price = 0,
-                    billing_amount = 0,
-                    destination = common_shipping_destination;
-                
-                $order_info_left.find('.a-fixed-left-grid').each(function () {
+            const
+                get_shipment_item_group_default = (list_index, $shipment) => {
                     const
-                        remark_list = [];
-                    
-                    let name = '',
-                        url = '',
-                        remarks = '',
-                        price = 0,
-                        number = 1;
+                        $order_info_left = $shipment.find('.a-col-left:first');
                     
                     const
-                        $order_info = $(this),
-                        $quantity = $order_info.find('.item-view-left-col-inner .item-view-qty'),
-                        $yohtmlc = $order_info.find('.yohtmlc-item');
+                        item_list = [],
+                        gift_token_info_list = [],
+                        other_price_info_list = [],
+                        card_info = {
+                            card_type : '',
+                            card_billing_date : '',
+                            card_billing_amount : '',
+                        },
+                        status = $shipment.find('.js-shipment-info-container').text().trim(),
+                        status_date = get_formatted_date_string(status), // TODO: 気付いたら年が省略されるようになってしまったので実質日付として取得できなくなっている(2025/02)
+                        status_date_ms = (status_date ? new Date(status_date).getTime() : 32503680000000) + list_index;
                     
-                    if (0 < $quantity.length) {
-                        number = parseInt($quantity.text().trim(), 10);
-                    }
+                    let is_gift_token = false,
+                        subtotal_price = 0,
+                        total_price = 0,
+                        billing_amount = 0,
+                        destination = common_shipping_destination;
                     
-                    $yohtmlc.children('.a-row').each(function () {
+                    $order_info_left.find('.a-fixed-left-grid').each(function () {
                         const
-                            $a_row = $(this);
+                            remark_list = [];
                         
-                        if (0 < $a_row.find('[role="button"]').length) {
-                            return;
+                        let name = '',
+                            url = '',
+                            remarks = '',
+                            price = 0,
+                            number = 1;
+                        
+                        const
+                            $order_info = $(this),
+                            $quantity = $order_info.find('.item-view-left-col-inner .item-view-qty'),
+                            $yohtmlc = $order_info.find('.yohtmlc-item');
+                        
+                        if (0 < $quantity.length) {
+                            number = parseInt($quantity.text().trim(), 10);
+                        }
+                        
+                        $yohtmlc.children('.a-row').each(function () {
+                            const
+                                $a_row = $(this);
+                            
+                            if (0 < $a_row.find('[role="button"]').length) {
+                                return;
+                            }
+                            
+                            const
+                                $product_link = $a_row.find('a.a-link-normal[href*="/product/"]');
+                            
+                            if (0 < $product_link.length) {
+                                name = $product_link.text().trim();
+                                url = get_absolute_url($product_link.attr('href'));
+                                return;
+                            }
+                            
+                            if (0 < price) {
+                                // TODO: ギフトラッピング等の金額が商品価格の後に現れる場合がある
+                                // →ラッピング価格等は$subtotals以下にも出ているのでとりあえず無視する(要検討)
+                                return;
+                            }
+                            
+                            const
+                                $price = $a_row.find('.a-color-price');
+                            
+                            if (0 < $price.length) {
+                                price = get_price_number($price.text());
+                                return;
+                            }
+                            
+                            remark_list.push($a_row.text().trim().replace(/\s+/, ' '));
+                        });
+                        
+                        subtotal_price += price * number;
+                        
+                        remarks = remark_list.join(' ').trim();
+                        
+                        item_list.push({
+                            name,
+                            url,
+                            remarks,
+                            price,
+                            number,
+                            status,
+                        });
+                    });
+                    
+                    return {
+                        is_gift_token,
+                        subtotal_price,
+                        total_price,
+                        destination,
+                        billing_amount,
+                        status,
+                        status_date_ms,
+                        card_info,
+                        item_list,
+                        gift_token_info_list,
+                        other_price_info_list,
+                    };
+                },
+                
+                get_shipment_item_group_variation1 = (list_index, $shipment) => {
+                    const
+                        $shipment_status = $shipment.find('[data-component="shipmentStatus"]'),
+                        $purchased_items = $shipment.find('[data-component="purchasedItems"] .a-fixed-left-grid');
+                    
+                    const
+                        item_list = [],
+                        gift_token_info_list = [],
+                        other_price_info_list = [],
+                        card_info = {
+                            card_type : '',
+                            card_billing_date : '',
+                            card_billing_amount : '',
+                        },
+                        status = $shipment_status.find('.od-status-message').text().trim(),
+                        status_date = get_formatted_date_string(status), // TODO: 気付いたら年が省略されるようになってしまったので実質日付として取得できなくなっている(2025/02)
+                        status_date_ms = (status_date ? new Date(status_date).getTime() : 32503680000000) + list_index;
+                    
+                    let is_gift_token = false,
+                        subtotal_price = 0,
+                        total_price = 0,
+                        billing_amount = 0,
+                        destination = common_shipping_destination;
+                    
+                    $purchased_items.each(function () {
+                        let name = '',
+                            url = '',
+                            remarks = '',
+                            price = 0,
+                            number = 1;
+                        
+                        const
+                            $purchased_item = $(this),
+                            $image_container = $purchased_item.find('[data-component="purchasedItemsLeftGrid"]'),
+                            $info_container = $purchased_item.find('[data-component="purchasedItemsRightGrid"]'),
+                            $quantity = $image_container.find('.od-item-view-qty');
+
+                        if (0 < $quantity.length) {
+                            number = parseInt($quantity.text().trim(), 10);
                         }
                         
                         const
-                            $product_link = $a_row.find('a.a-link-normal[href*="/product/"]');
+                            $itemTitle = $info_container.find('[data-component="itemTitle"]'),
+                            $orderedMerchant = $info_container.find('[data-component="orderedMerchant"]'),
+                            $itemReturnEligibility = $info_container.find('[data-component="itemReturnEligibility"]'),
+                            $serviceAppointmentStatus = $info_container.find('[data-component="serviceAppointmentStatus"]'),
+                            $unitPrice = $info_container.find('[data-component="unitPrice"]'),
+                            $deliveryFrequency = $info_container.find('[data-component="deliveryFrequency"]'),
+                            $customizedItemDetails = $info_container.find('[data-component="customizedItemDetails"]'),
+                            $purchasedVariationDetails = $info_container.find('[data-component="purchasedVariationDetails"]'),
+                            $giftcardsSender = $info_container.find('[data-component="giftcardsSender"]'),
+                            $itemConnections = $info_container.find('[data-component="itemConnections"]'),
+                            $giftCardDetails = $info_container.find('[data-component="giftCardDetails"]');
+                            // TODO: 新しいフォーマットになった影響でどういう情報が入るのか精査できていない（2025/02現在）
+                        
+                        const
+                            $product_link = $itemTitle.find('.a-link-normal');
                         
                         if (0 < $product_link.length) {
                             name = $product_link.text().trim();
                             url = get_absolute_url($product_link.attr('href'));
-                            return;
-                        }
-                        
-                        if (0 < price) {
-                            // TODO: ギフトラッピング等の金額が商品価格の後に現れる場合がある
-                            // →ラッピング価格等は$subtotals以下にも出ているのでとりあえず無視する(要検討)
-                            return;
                         }
                         
                         const
-                            $price = $a_row.find('.a-color-price');
+                            $prices = $unitPrice.find('.a-price > span');
+                            // TODO: '.a-offscreen'と'[aria-hidden="true"]'の二種類があり、どちらを採用してよいか不明→とりあえず、もし値に違いがあれば安い方を採用
                         
-                        if (0 < $price.length) {
-                            price = get_price_number($price.text());
-                            return;
-                        }
+                        $prices.each(function () {
+                            const
+                                $price = $(this),
+                                work_price = get_price_number($price.text());
+                            
+                            if ((price <= 0) || (work_price < price)) {
+                                price = work_price;
+                            }
+                        });
                         
-                        remark_list.push($a_row.text().trim().replace(/\s+/, ' '));
+                        subtotal_price += price * number;
+                        
+                        remarks = [
+                            $orderedMerchant, 
+                            $itemReturnEligibility,
+                            $serviceAppointmentStatus,
+                            $deliveryFrequency,
+                            $customizedItemDetails,
+                            $purchasedVariationDetails,
+                            $giftcardsSender,
+                        ].reduce((remark_list, $part) => {
+                            const
+                                part_text = $part.text().trim().replace(/\s+/, ' ');
+                            
+                            if (part_text != '') {
+                                remark_list.push(part_text);
+                            }
+                            return remark_list;
+                        },[]).join(' ').trim();
+                        
+                        item_list.push({
+                            name,
+                            url,
+                            remarks,
+                            price,
+                            number,
+                            status,
+                        });
                     });
                     
-                    subtotal_price += price * number;
-                    
-                    remarks = remark_list.join(' ').trim();
-                    
-                    item_list.push({
-                        name,
-                        url,
-                        remarks,
-                        price,
-                        number,
+                    return {
+                        is_gift_token,
+                        subtotal_price,
+                        total_price,
+                        destination,
+                        billing_amount,
                         status,
-                    });
-                });
+                        status_date_ms,
+                        card_info,
+                        item_list,
+                        gift_token_info_list,
+                        other_price_info_list,
+                    };
+                };
+            
+            $shipments.each(function (list_index) {
+                const
+                    $shipment = $(this);
                 
-                item_group_list.push({
-                    is_gift_token,
-                    subtotal_price,
-                    total_price,
-                    destination,
-                    billing_amount,
-                    status,
-                    status_date_ms,
-                    card_info,
-                    item_list,
-                    gift_token_info_list,
-                    other_price_info_list,
-                });
+                let shipment_pattern = 'default',
+                    item_group;
+                
+                if (0 < $shipment.find('[data-component="shipmentsLeftGrid"]').length) {
+                    shipment_pattern = 'variation1';
+                }
+                switch (shipment_pattern) {
+                    case 'variation1':
+                        item_group = get_shipment_item_group_variation1(list_index, $shipment);
+                        break;
+                    
+                    default:
+                        item_group = get_shipment_item_group_default(list_index, $shipment);
+                        break;
+                }
+                
+                item_group_list.push(item_group);
             });
             
             item_group_list.sort((a, b) => a.status_date_ms - b.status_date_ms);
@@ -4957,6 +5178,9 @@ function init_order_page_in_iframe( open_parameters ) {
                     order_total_price,
                     order_billing_destination,
                     order_billing_amount,
+                    order_refund_amount,
+                    order_refund_invoice_url,
+                    order_invoice_links_request_url,
                     order_url,
                     receipt_url,
                     card_info_list,
@@ -4974,13 +5198,29 @@ function init_order_page_in_iframe( open_parameters ) {
                 $orderDetails = $html_fragment.find('#orderDetails'),
                 $order_date_invoice_items = $orderDetails.find('.order-date-invoice-item'),
                 $summary_container = $orderDetails.find('.a-box-group.a-spacing-base'),
-                $subtotals = $summary_container.find('.a-fixed-right-grid-col.a-col-right').filter(function () {
-                    return /領収書/.test($(this).children('h5.a-text-left').text());
-                }),
+                $subtotals_container = $summary_container.find('.a-fixed-right-grid-col.a-col-right'),
+                $subtotals = (() => {
+                    let $subtotals = $subtotals_container.children('[data-component="orderSubtotals"]');
+                    if ($subtotals.length < 1) {
+                        $subtotals = $subtotals_container.filter(function () {
+                            return /領収書/.test($(this).children('h5.a-text-left').text());
+                        });
+                    }
+                    return $subtotals;
+                })(),
                 $payments_instrument_list = $summary_container.find('.pmts-payments-instrument-list'),
-                $shipments = $orderDetails.children('.a-box').filter(function () {
-                    return (0 < $(this).find('.js-shipment-info-container').length);
-                });
+                $shipments = (() => {
+                    let $shipments = $orderDetails.children('.a-box').filter(function () {
+                            return (0 < $(this).find('.js-shipment-info-container').length);
+                        });
+                    
+                    if ($shipments.length < 1) {
+                        $shipments = $orderDetails.find('[data-component="shipments"] > .a-box').filter(function () {
+                            return (0 < $(this).find('.js-shipment-info-container').length);
+                        });
+                    }
+                    return $shipments;
+                })();
             
             const
                 order_url = order_detail_url,
@@ -5337,7 +5577,43 @@ function init_order_page_in_iframe( open_parameters ) {
                 order_parameters : order_parameters,
             };
             
-            finish();
+            if (
+                (! refund_info) ||
+                (0 < refund_info.refund_list.length) ||
+                (order_parameters?.order_refund_amount === undefined)
+            ) {
+                finish();
+                return;
+            }
+            
+            (async () => {
+                if (
+                    (order_parameters.order_refund_amount !== '') && 
+                    (order_parameters.order_refund_invoice_url === '') && 
+                    (order_parameters.order_invoice_links_request_url !== '')
+                ) {
+                    const
+                        response = await fetch(order_parameters.order_invoice_links_request_url);
+                    if (response.ok) {
+                        const
+                            invoice_links_html = await response.text(),
+                            $invoceLinksList = get_jq_html_fragment(invoice_links_html);
+                        
+                        order_parameters.order_refund_invoice_url = get_refund_invoice_url($invoceLinksList);
+                    }
+                }
+                
+                if (order_parameters.order_refund_invoice_url !== '') {
+                    refund_info.refund_invoice_url = order_parameters.order_refund_invoice_url; // TODO: 返金明細書のURLはワンタイムのものかも知れない（参照するたびに変化し、古いものでアクセスするとエラーになる模様）
+                    refund_info.refund_list.push({
+                        date : '',
+                        price : order_parameters.order_refund_amount,
+                        remarks : '※詳細は注文概要を参照',
+                    });
+                }
+                
+                finish();
+            })();
         } )
         .fail( function ( jqXHR, textStatus, errorThrown ) {
             log_error( order_detail_url, textStatus );
