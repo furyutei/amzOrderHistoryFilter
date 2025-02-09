@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.2.0
+// @version         0.1.2.1
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -1926,10 +1926,21 @@ var TemplateOrderHistoryFilter = {
             jq_order_info_actions_base = jq_order_info_actions.find( '.yohtmlc-order-level-connections' ),
             order_detail_url = jq_order_info_actions_base.find( 'a.a-link-normal:first' ).attr( 'href' ),
             //order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' ),
-            order_receipt_url = '/gp/css/summary/print.html/ref=oh_aui_ajax_invoice?ie=UTF8&orderID=' + encodeURIComponent(order_id),
             // TODO: '.hide-if-js a.a-link-normal'な要素が無くなっている（2024/11/08）
             // →'.a-declarative[data-action="a-popover"]'のdata-a-popover(JSON)の'url'か、'.a-declarative[data-action="a-popover"] > a.a-link-normal'のhrefから、ポップアップ用のページを取得し、さらに「領収書／購入明細書」のリンクから実際の領収書ページのURLを取得するのが本来の方法だが、処理が煩雑で待ち時間が増える
-            // →'/gp/css/summary/print.html/ref=oh_aui_ajax_invoice?ie=UTF8&orderID=' + encodeURIComponent(order_id)で決め打ち（うまくいかない可能性あり）
+            // →URLを決め打ち（うまくいかない可能性もある？）
+            order_receipt_url = (() => {
+                let order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' );
+                if (! order_receipt_url) {
+                    if (/^D/.test(order_id)) {
+                        order_receipt_url = '/gp/digital/your-account/order-summary.html/?print=1&orderID=' + encodeURIComponent(order_id);
+                    }
+                    else {
+                        order_receipt_url = '/gp/css/summary/print.html/ref=oh_aui_ajax_invoice?ie=UTF8&orderID=' + encodeURIComponent(order_id);
+                    }
+                }
+                return order_receipt_url;
+            })(),
             jq_cancel_button = jq_delivery_box_list.find( '.a-fixed-right-grid-col.a-col-right .yohtmlc-shipment-level-connections a[role="button"]' ).filter( [
                 '[href*="/your-account/order-edit.html"][href*="type=e"]',
                 '[href*="/order/edit.html"][href*="useCase=cancel"]',
@@ -2040,7 +2051,20 @@ var TemplateOrderHistoryFilter = {
             order_id = jq_order_info_actions.find( '.a-size-mini .value' ).text().trim(),
             jq_order_info_actions_base = jq_order_info_actions.find( '.a-size-base' ),
             order_detail_url = jq_order_info_actions_base.find( 'a.a-link-normal:first' ).attr( 'href' ),
-            order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' ),
+            //order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' ),
+            //[メモ] ここに来た場合は存在するはずだが、念の為決め打ちもできるようにしておく
+            order_receipt_url = (() => {
+                let order_receipt_url = jq_order_info_actions_base.find( '.hide-if-js a.a-link-normal' ).attr( 'href' );
+                if (! order_receipt_url) {
+                    if (/^D/.test(order_id)) {
+                        order_receipt_url = '/gp/digital/your-account/order-summary.html/?print=1&orderID=' + encodeURIComponent(order_id);
+                    }
+                    else {
+                        order_receipt_url = '/gp/css/summary/print.html/ref=oh_aui_ajax_invoice?ie=UTF8&orderID=' + encodeURIComponent(order_id);
+                    }
+                }
+                return order_receipt_url;
+            })(),
             jq_cancel_button = jq_order.find( 'a[role="button"]' ).filter( [
                 '[href*="/your-account/order-edit.html"][href*="type=e"]',
                 '[href*="/order/edit.html"][href*="useCase=cancel"]',
