@@ -5,6 +5,7 @@
   },
   "dependencies": {
     "acorn": "^7.1.1",
+    "cross-spawn": "^7.0.5",
     "lodash": "^4.17.21",
     "minimist": "^1.2.2"
   }
