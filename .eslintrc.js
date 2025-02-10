@@ -17,6 +17,7 @@ module.exports = {
         "GM_setValue": "readonly",
         "GM_getValue": "readonly",
         "content": "readonly",
+        "cloneInto": "readonly",
     },
     "parserOptions": {
         "ecmaVersion": "latest",

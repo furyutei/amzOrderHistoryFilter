@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.2.1
+// @version         0.1.2.2
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -3418,6 +3418,103 @@ var TemplateReceiptOutputPage = {
                 $receipt_body_eu_invoice.parents('td[align="right"]:first').text(),
                 get_absolute_url($receipt_body_eu_invoice.find('a:last').attr('href')),
             ].join(' ').trim().replace(/\s+/g, ' ');
+        }
+        
+        {
+            // [メモ] 注文詳細画面から発送日付が取得できなくなったため、こちらで取得(2025/02)
+            const
+                $status_infos = $order_container.find('b.sans > center'),
+                status_info_map = {};
+            
+            $status_infos.each(function() {
+                const
+                    $status_info = $(this),
+                    status = $status_info.text().trim(),
+                    status_date = get_formatted_date_string(status),
+                    status_date_ms_base = status_date ? new Date(status_date).getTime() : 32503680000000,
+                    $item_name_list = $status_info.parents('table').eq(1).find('i');
+                
+                $item_name_list.each(function() {
+                    const
+                        item_name = $(this).text().trim();
+                    
+                    status_info_map[item_name] = {
+                        status,
+                        status_date,
+                        status_date_ms_base,
+                    };
+                });
+            });
+            
+            // [メモ] 商品名をキーにして発送日付情報と結びつけ
+            // TODO: 簡易的な処理なので、例えば同一商品がある場合は誤動作してしまう（個数と金額を考慮すれば精度は上がるが、処理が煩雑なので現状は行っていない）
+            order_parameters.item_group_list.forEach((item_group, group_index) => {
+                let status_info;
+                const
+                    matched_item_list = item_group.item_list.filter(item => {
+                        status_info = status_info_map[item.name];
+                        return (status_info !== undefined);
+                    });
+                
+                if (matched_item_list.length < 1) {
+                    return;
+                }
+                if (matched_item_list.length == item_group.item_list.length) {
+                    delete status_info_map[item_group.item_list[0].name];
+                    item_group.status = status_info.status;
+                    item_group.status_date_ms = status_info.status_date_ms_base + group_index;
+                    item_group.item_list.forEach(item => {
+                        item.status = status_info.status;
+                    });
+                }
+            });
+            order_parameters.item_group_list.sort((a, b) => a.status_date_ms - b.status_date_ms);
+        }
+        
+        if (order_parameters.card_info_list.length < 1) {
+            // [メモ] 注文詳細画面からカード履歴が取得できなくなったため、こちらで取得(2025/02)
+            const
+                card_info_list = [],
+                $charge_to_card_infos = $order_container.find('#pos_view_section table td > div').filter(function(){return (($(this).parent().children().length == 1) && $(this).text('カードへの請求'));}).parents('table').first().find('td[align="right"] table tr');
+            
+            $charge_to_card_infos.each(function(list_index) {
+                const
+                    $charge_to_card_info = $(this),
+                    $charge_to_card_data = $charge_to_card_info.children('td');
+                
+                if ($charge_to_card_data.length != 2) {
+                    return;
+                }
+                const
+                    card_date_infos = ($charge_to_card_data.first().text() ?? '').split(/:/),
+                    card_type = (card_date_infos[0] ?? '').trim(),
+                    card_billing_date = get_formatted_date_string(card_date_infos[1] ?? '');
+                
+                if ((card_type != '') && (card_billing_date != '')) {
+                    const
+                        card_billing_amount = get_price_number($charge_to_card_data.last().text());
+                    if (card_billing_amount != '') {
+                        card_info_list.push({
+                            card_type,
+                            card_billing_date,
+                            card_billing_amount,
+                            card_billing_date_ms : new Date(card_billing_date).getTime() + 23 * 3600000 + list_index,
+                        });
+                    }
+                }
+            });
+            if (0 < card_info_list.length) {
+                card_info_list.sort((a, b) => a.card_billing_date_ms - b.card_billing_date_ms);
+                //order_parameters.card_info_list = card_info_list;
+                // [メモ] ↑は、Firefox だと「Error: Not allowed to define cross-origin object as property on [Object] or [Array] XrayWrapper」となってしまう
+                
+                if (typeof cloneInto == 'function') {
+                    order_parameters.card_info_list = cloneInto(card_info_list, order_parameters);
+                }
+                else {
+                    order_parameters.card_info_list = card_info_list;
+                }
+            }
         }
         
         const
