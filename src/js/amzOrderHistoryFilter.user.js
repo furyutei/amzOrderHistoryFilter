@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.2.2
+// @version         0.1.2.3
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -1830,7 +1830,7 @@ var TemplateOrderHistoryFilter = {
                 order_history_page_info = get_order_history_page_info(jq_html_fragment.get(0)),
                 is_legacy_page = (order_history_page_info.legacy_order_page_content_container != null),
                 $order_page_content_container = $( order_history_page_info.order_page_content_container ?? order_history_page_info.legacy_order_page_content_container ),
-                jq_orders = $order_page_content_container.find( is_legacy_page ? '#ordersContainer > .js-order-card' : '> .js-order-card' );
+                jq_orders = $order_page_content_container.find( is_legacy_page ? '#ordersContainer > .js-order-card' : '> .js-order-card, > .order-card__list > .js-order-card' );
             
             total_order_number += jq_orders.length;
             
@@ -1852,7 +1852,6 @@ var TemplateOrderHistoryFilter = {
                     error_order_number ++;
                     return;
                 }
-                
                 if ( individual_order_info.order_date_info.month < 0 ) {
                     log_info( '[malformed order info]\n', individual_order_info );
                     
