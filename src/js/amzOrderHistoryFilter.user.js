@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.2.3
+// @version         0.1.2.4
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -1799,8 +1799,8 @@ var TemplateOrderHistoryFilter = {
             order_information = self.order_information,
             month_order_info_lists = order_information.month_order_info_lists = {},
             destination_infos = order_information.destination_infos = {},
-            order_error_urls = order_information.order_error_urls = [];
-        
+            order_error_urls = order_information.order_error_urls = [],
+            order_id_map = {};
         
         for ( month_number = 0; month_number <= 12; month_number ++ ) {
             month_order_info_lists[ month_number ] = [];
@@ -1861,6 +1861,11 @@ var TemplateOrderHistoryFilter = {
                     error_order_number ++;
                     return;
                 }
+                if (order_id_map[individual_order_info.order_id]) {
+                    log_info(`[duplicated order] order_id: ${individual_order_info.order_id}`);
+                    return;
+                }
+                order_id_map[individual_order_info.order_id] = individual_order_info;
                 
                 month_order_info_lists[ 0 ].push( individual_order_info );
                 month_order_info_lists[ individual_order_info.order_date_info.month ].push( individual_order_info );
@@ -4607,8 +4612,9 @@ const
             is_order_history_page : (
                 (
                     legacy_order_page_content_container?.querySelector(':scope > #controlsContainer > #orderTypeMenuContainer > [role="tablist"] > [role^="tab"].selected')?.textContent ??
-                    order_page_content_container?.querySelector(':scope > .page-tabs > [role="tablist"] > [role^="tab"].page-tabs__tab--selected')?.textContent ?? // [2025/01/31] 選択された要素(.page-tabs__tab--selected)のroleが"tab"→"tabpanel"に変更された
-                    ''
+                    order_page_content_container?.querySelector(':scope > .page-tabs > ul > li.page-tabs__tab.page-tabs__tab--selected, :scope > .page-tabs > [role="tablist"] > [role^="tab"].page-tabs__tab--selected')?.textContent ?? ''
+                    // [2025/01/31] 選択された要素(.page-tabs__tab--selected)のroleが"tab"→"tabpanel"に変更された
+                    // [2025/02/26] [role="tablist"]や[role^="tab"]がつかなくなった
                 ).trim() == '注文'
             ),
         };
