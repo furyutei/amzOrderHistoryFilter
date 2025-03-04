@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.2.4
+// @version         0.1.2.5
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -1499,7 +1499,7 @@ var TemplateOrderHistoryFilter = {
         
         $( window ).off( 'scroll.update_order_container resize.update_order_container' );
         
-        jq_order_container.children( '.js-order-card' ).remove();
+        jq_order_container.children( '.js-order-card,.order-card__list' ).remove();
         
         target_month_order_info_list.forEach( function ( order_info ) {
             if ( ( ! filter_options.include_digital ) && ( order_info.is_digital ) ) {
@@ -4904,23 +4904,36 @@ function init_order_page_in_iframe( open_parameters ) {
             }
             else if (0 < $briefOrderInfoInvoice.get(0).children.length) {
                 const
-                    $date_orderid_info = $briefOrderInfoInvoice.find('[data-component="briefOrderInfo"] .a-icon-text-separator').parent();
+                    $briefOrderInfoInvoiceLeftGrid = $briefOrderInfoInvoice.find('[data-component="briefOrderInfoInvoiceLeftGrid"]'),
+                    $orderDate = $briefOrderInfoInvoiceLeftGrid.find('[data-component="orderDate"] > span'),
+                    $orderId = $briefOrderInfoInvoiceLeftGrid.find('[data-component="orderId"] > span');
                 
-                $date_orderid_info.contents().each(function(){
-                    if (this.nodeType != 3) {
-                        return;
-                    }
+                if (0 < $orderDate.length) {
+                    order_date = get_formatted_date_string($orderDate.text().trim());
+                }
+                if (0 < $orderId.length) {
+                    order_id = $orderId.text().trim();
+                }
+                
+                if ((order_date === '') || (order_id === '')) {
                     const
-                        work_text = this.nodeValue;
+                        $date_orderid_info = $briefOrderInfoInvoice.find('[data-component="briefOrderInfo"] .a-icon-text-separator').parent();
                     
-                    if (order_date === '') {
-                        order_date = get_formatted_date_string(work_text);
-                    }
-                    else if (order_id === '') {
-                        order_id = work_text.match(/[\d\-]+/)[0] ?? '';
-                    }
-                });
-                
+                    $date_orderid_info.contents().each(function(){
+                        if (this.nodeType != 3) {
+                            return;
+                        }
+                        const
+                            work_text = this.nodeValue;
+                        
+                        if (order_date === '') {
+                            order_date = get_formatted_date_string(work_text);
+                        }
+                        else if (order_id === '') {
+                            order_id = work_text.match(/[\d\-]+/)[0] ?? '';
+                        }
+                    });
+                }
                 order_invoice_links_request_url = (() => {
                     try {
                         return get_absolute_url(JSON.parse($briefOrderInfoInvoice.find('[data-component="orderInvoice"] .a-declarative').attr('data-a-popover')).url);
