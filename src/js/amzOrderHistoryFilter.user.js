@@ -3,7 +3,7 @@
 // @name:ja         アマゾン注文履歴フィルタ
 // @namespace       http://furyu.hatenablog.com/
 // @author          furyu
-// @version         0.1.2.5
+// @version         0.1.2.6
 // @include         https://www.amazon.co.jp/gp/your-account/order-history*
 // @include         https://www.amazon.co.jp/gp/legacy/order-history*
 // @include         https://www.amazon.co.jp/gp/css/order-history*
@@ -1950,7 +1950,10 @@ var TemplateOrderHistoryFilter = {
                 '[href*="/order/edit.html"][href*="useCase=cancel"]',
                 '[href*="/ss/help/contact/"][href*="cancelRequest=1"]'
             ].join( ',' ) ),
-            jq_order_item_infos = jq_delivery_box_list.find( '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left > .a-row.a-spacing-top-base .a-fixed-left-grid-col.a-col-right > .a-row' ).filter( function () {
+            jq_order_item_infos = jq_delivery_box_list.find( [
+                '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left > .a-row.a-spacing-top-base .a-fixed-left-grid-col.a-col-right > .a-row',
+                '.a-fixed-right-grid .a-fixed-right-grid-col.a-col-left .a-row.a-spacing-top-base .a-fixed-left-grid-col.a-col-right > .a-row:has(.yohtmlc-product-title)',
+            ].join(',') ).filter( function () {
                 return ( $( this ).find( '.a-button' ).length <= 0 );
             } ).clone(),
             jq_gift_card_recipient_list = jq_order_item_infos.find( '.gift-card-instance .recipient' ),
